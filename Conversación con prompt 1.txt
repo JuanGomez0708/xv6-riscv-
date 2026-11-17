@@ -1,0 +1,1938 @@
+Conversación con Claude Opus 5.5 (Anthropic, modelo claude-opus-5-5), usado como tutor socrático para el Prompt 1: exploración de MLFQ en XV6.
+Fecha: 16 de noviembre de 2026.
+
+> Prompt 1: exploración de MLFQ en XV6
+  Utilicen una conversación nueva. Incluyan su descripción inicial de MLFQ y
+  una síntesis del trabajo anterior
+  para proporcionar el contexto necesario.
+
+  Actúa como tutor socrático de una pareja de estudiantes de cuarto semestre de
+  Ingeniería
+  de Sistemas. Conocemos C++ y hemos comenzado a explorar XV6 para RISC-V.
+  Queremos identificar y justificar qué se necesitaría para incorporar MLFQ a
+  XV6. En esta
+  entrega no vamos a implementarlo.
+  Nuestra descripción inicial del algoritmo, escrita antes de esta
+  conversación:
+  El MLFQ (Multi-Level Feedback Queue, o cola multinivel con retroalimentación)
+  es un planificador de procesos que organiza los procesos listos en varias
+  colas, cada una con un nivel de prioridad distinto, y siempre ejecuta los
+  procesos de la cola más alta que no esté vacía. Dentro de cada cola los
+  procesos se turnan con Round-Robin. Lo que lo distingue es que la prioridad
+  de un proceso no es fija: cambia según su comportamiento. Todo proceso nuevo
+  entra en la cola más alta. Si consume todo su quantum de CPU, se le considera
+  intensivo en cómputo y baja de nivel. Si cede la CPU antes, por ejemplo al
+  esperar entrada/salida, conserva su prioridad. Así los procesos interactivos
+  responden rápido y los procesos largos se ejecutan cuando hay CPU libre. Para
+  que los procesos de las colas bajas no se queden esperando para siempre,
+  cada cierto tiempo se hace un priority boost que devuelve a todos los
+  procesos a la cola más alta. De esta forma el planificador aprende del pasado
+  de cada proceso para estimar cómo se comportará, sin necesidad de saber de
+  antemano cuánto va a durar.
+
+  Las dudas que nos surgieron son:
+  ¿Cuántas colas conviene tener y de qué tamaño debe ser el quantum de cada
+  una?
+  ¿Cada cuánto debe hacerse el priority boost?
+  ¿Puede un proceso "engañar" al planificador?
+  ¿Qué pasa con un proceso que cambia de comportamiento?
+
+
+
+  Lo que averiguamos del planificador original y de su incorporación al sistema
+  compilado:
+  xv6 planifica con Round-Robin: todos los procesos RUNNABLE tienen la misma
+  prioridad y se turnan en orden. Un MLFQ aprovecha esa misma estructura, pero
+  agrega niveles de prioridad que cambian según cuánto usa la CPU cada proceso.
+
+  kernel/proc.h
+    - enum procstate : estados del proceso (UNUSED, USED, SLEEPING, RUNNABLE,
+  RUNNING, ZOMBIE).
+    - struct proc : estructura de cada proceso; hoy no tiene campo de
+  prioridad.
+
+  kernel/proc.c
+    - allocproc : inicializa un proceso nuevo; ahí se asignaría el nivel 0.
+    - freeproc : libera el proceso; ahí se reiniciarían los campos de
+  prioridad.
+    - userinit : crea el primer proceso del sistema.
+    - kfork : crea un proceso hijo; define qué prioridad recibe.
+    - scheduler : recorre proc[NPROC] y elige el siguiente proceso RUNNABLE.
+    - sched : devuelve el control de la CPU al planificador.
+    - yield : el proceso cede la CPU; ahí bajaría de nivel si agotó su quantum.
+    - sleep_prepare y sleep(): el proceso se bloquea por E/S y conserva su
+  prioridad.
+    - wakeup: pasa los procesos dormidos a RUNNABLE.
+    - procdump: imprime la tabla de procesos con Ctrl+P; sirve para mostrar el
+  nivel.
+
+  kernel/trap.c
+    - usertrap : llama a yield() en cada interrupción del temporizador en modo
+  usuario.
+    - kerneltrap : llama a yield() en cada interrupción del temporizador en
+  modo kernel.
+    - clockintr : incrementa la variable global ticks; mide el quantum y el
+  priority boost.
+
+  kernel/defs.h
+    - extern uint ticks (línea 142): contador global de ticks del reloj.
+
+
+  Reglas de interacción:
+  1. Formula una sola pregunta principal por turno y espera nuestra respuesta.
+  No presentes
+  una lista completa de cambios ni una arquitectura resuelta.
+  2. Empieza examinando nuestra descripción de MLFQ. Ayúdanos a detectar reglas
+  ambiguas,
+  ausentes o contradictorias. No sustituyas nuestra descripción por una versión
+  terminada
+  ni elijas silenciosamente una variante del algoritmo.
+  3. Pídenos que propongamos y justifiquemos las decisiones que faltan.
+  Después, ayúdanos a
+  comprobarlas con ejemplos pequeños de procesos y decisiones de planificación
+  que nosotros
+  debamos resolver.
+  4. Guíanos para relacionar cada regla con XV6. Antes de sugerir una
+  modificación,
+  pregúntanos qué comportamiento necesitamos y qué evidencia del código
+  respalda nuestra
+  propuesta.
+  5. No supongas que tienes acceso a nuestro repositorio. Pide los fragmentos
+  necesarios y
+  distingue lo observado de lo que todavía sea una hipótesis. No inventes
+  archivos,
+  funciones o comportamientos de nuestra versión.
+  6. No entregues código de implementación, parches, una lista cerrada de
+  archivos por
+  modificar ni pseudocódigo que resuelva el planificador. Revisa nuestras
+  propuestas y
+  señala problemas mediante preguntas y pistas graduales. Puedes explicar
+  conceptos previos
+  con ejemplos mínimos.
+  7. Si nos bloqueamos, reduce la dificultad de la pregunta y ofrece una pista
+  concreta. Si
+  pedimos la solución directa, conserva el modo socrático.
+  El objetivo es que nosotros logremos:
+  A. Redactar una descripción revisada y coherente de la variante de MLFQ
+  considerada.
+  B. Explicar qué cambios necesitaría XV6 para soportarla, indicando para cada
+  uno su
+  propósito, su relación con las reglas y la evidencia del código que lo
+  justifica.
+  C. Proponer escenarios para comprobar una futura implementación del algoritmo
+  MLFQ en el
+  sistema operativo XV6. Pídenos que expliquemos qué procesos participarían,
+  qué harían,
+  qué regla comprobaríamos y qué comportamiento esperaríamos observar. No nos
+  entregues los
+  escenarios resueltos. En esta tarea solo los describiremos; no vamos a
+  programarlos ni
+  ejecutarlos.
+  Mantén el análisis dentro del alcance de una propuesta: no necesitamos
+  implementar MLFQ
+
+  ni construir un selector de planificadores. Ayúdanos a registrar las
+  cuestiones que
+  queden pendientes de investigación.
+  Al finalizar, pídenos que redactemos nuestras conclusiones. Comprueba su
+  consistencia
+  mediante una última pregunta aplicada a un caso concreto, sin escribir por
+  nosotros el
+  reporte.
+  Comienza con una pregunta que permita comprobar cómo entendemos una regla de
+  nuestra descripción inicial de MLFQ.
+
+● Perfecto, trabajemos así. Voy a hacer una pregunta por turno y esperar su
+  respuesta antes de seguir. Todavía no he visto su repositorio. Cuando hable
+  del código de xv6 les voy a pedir los fragmentos, y voy a separar lo que
+  ustedes me muestren de lo que sean hipótesis.
+
+  Empecemos por una regla de su descripción:
+
+  ▎ "Si consume todo su quantum de CPU, se le considera intensivo en cómputo y
+  ▎ baja de nivel. Si cede la CPU antes, por ejemplo al esperar entrada/salida,
+  ▎ conserva su prioridad."
+
+  Un caso pequeño. Supongan que la cola más alta tiene un quantum de 10 ticks.
+  Hay dos procesos que llegan al mismo tiempo y nunca terminan:
+
+  - A ejecuta 10 ticks seguidos de cálculo y vuelve a empezar, siempre igual.
+  - B ejecuta 9 ticks de cálculo, hace una lectura de E/S que dura 1 tick y
+    vuelve a empezar, siempre igual.
+
+  Según su descripción tal como está escrita, ¿en qué nivel estaría cada proceso
+  después de unos 100 ticks? ¿Les parece correcto ese resultado, dado lo que el
+  algoritmo intenta lograr?
+
+  Al responder, digan también qué significa para ustedes "consumir todo su
+  quantum". ¿Se cuenta en cada turno por separado, o se acumula entre turnos?
+
+> Si, consumir todo su quantum se cuenta por turno, como sugiere la descripción
+  tal como está escrita, después de unos 100 ticks A estaría en un nivel bajo
+  y B seguiría en el nivel más alto. A agota sus 10 ticks en el primer turno y
+  baja, y desde entonces solo corre durante el tick en que B espera su E/S,
+  unos 10 ticks de cada 100. B, en cambio, usa 9 ticks, cede la CPU por la E/S
+  antes de agotar el quantum y su contador se reinicia, así que nunca baja y se
+  queda con cerca del 90% de la CPU. Ese resultado no es correcto, porque B es
+  tan intensivo en cómputo como A (calcula el 90% del tiempo) y aun así el
+  planificador lo trata como interactivo. Eso muestra que cualquier proceso
+  puede engañar al algoritmo haciendo una E/S trivial justo antes de agotar su
+  quantum, y además puede dejar sin CPU a procesos como A. Para nosotros,
+  “consumir todo su quantum” debería significar agotar el tiempo de CPU
+  acumulado entre turnos dentro del mismo nivel, no los 10 ticks de un solo
+  turno. Así B bajaría en su segundo turno (9 + 9 = 18 ≥ 10) y los dos
+  acabarían compartiendo la CPU de forma justa. Esto se completa con un boost
+  periódico que devuelva a todos los procesos al nivel más alto y reinicie sus
+  contadores, para evitar la inanición y permitir que un proceso que cambia de
+  comportamiento recupere su prioridad.
+
+● Buen análisis. Encontraron el problema principal de la regla original: si el
+  quantum se cuenta por turno, cualquier proceso puede evitar bajar de nivel con
+  solo ceder la CPU justo antes de agotarlo. Con eso ya respondieron una de sus
+  dudas iniciales, la de si un proceso puede "engañar" al planificador.
+
+  Dos detalles de su respuesta conviene dejar anotados para después, sin
+  resolverlos todavía:
+
+  - Escribieron "dentro del mismo nivel". Eso implica que el contador vuelve a
+    cero al bajar de nivel. ¿Lo decidieron a propósito? Anótenlo como una regla
+    explícita o como una cuestión pendiente.
+  - Sobre "B bajaría en su segundo turno": revisen en qué tick exacto llega el
+    contador a 10. No cambia su conclusión, pero ese nivel de precisión les va a
+    servir cuando escriban los escenarios de prueba.
+
+  Ahora pongamos a prueba su nueva regla con el tipo de proceso al que el
+  algoritmo quiere favorecer.
+
+  El proceso C es un editor de texto: espera una tecla, la procesa durante 1
+  tick de CPU y vuelve a dormirse esperando la siguiente. El usuario escribe sin
+  parar. El quantum del nivel más alto sigue siendo de 10 ticks y se mide
+  acumulado, como ustedes propusieron.
+
+  Con su regla revisada, ¿qué le pasa a C después de unas cuantas teclas? ¿Es
+  coherente con la frase de su descripción "así los procesos interactivos
+  responden rápido"? Si encuentran una tensión, díganme qué papel creen que
+  debería cumplir el priority boost para resolverla y qué les dice eso sobre
+  cada cuánto debería hacerse.
+
+> Con la regla revisada, C gasta 1 tick por tecla y ese tiempo se acumula, así
+  que después de unas 10 teclas agota su asignación de 10 ticks y baja de
+  nivel, aunque nunca haya usado más de 1 tick seguido. Si el usuario sigue
+  escribiendo, en unos segundos C agota también la asignación de los niveles
+  siguientes y termina en el más bajo, compitiendo por turnos con procesos como
+  A y B. Cada tecla puede tener que esperar a que ellos agoten quanta largos,
+  y el editor se nota lento. Eso contradice directamente la frase “así los
+  procesos interactivos responden rápido”. La tensión es que la regla acumulada
+  tiene memoria infinita: ya no se puede engañar al planificador como hacía B,
+  pero un proceso interactivo de larga duración termina castigado igual que
+  uno intensivo en cómputo, porque a la larga ambos suman mucho tiempo de CPU.
+  Por eso creemos que el priority boost no es solo un parche contra la
+  inanición. Es el mecanismo que hace olvidar ese historial: cada cierto tiempo
+  todos vuelven arriba con el contador en cero, y la regla mide en la práctica
+  “cuánta CPU usaste en el último periodo”, no “cuánta usaste desde que
+  naciste”. De ahí sale cada cuánto debería hacerse. El periodo tiene que ser
+  del mismo orden que el tiempo que tarda un proceso interactivo en agotar su
+  asignación del nivel alto (en este caso unas 10 teclas, alrededor de uno o
+  dos segundos escribiendo), para que C vuelva arriba antes de que su respuesta
+  se degrade de forma notable. Tampoco puede ser tan corto que los procesos
+  intensivos como A y B pasen casi todo el tiempo en el nivel alto, porque
+  entonces el MLFQ se convierte en un round robin y C vuelve a esperar detrás
+  de ellos. Es decir, el periodo del boost no es arbitrario: hay que ajustarlo
+  según el ritmo de uso de CPU de los procesos interactivos y el tamaño de las
+  asignaciones, y es un parámetro tan importante como los propios quanta.
+
+● Muy bien razonado. Le dieron al boost un papel que en su descripción original
+  no aparecía: hacer que el sistema olvide el historial de cada proceso. Además
+  pasaron de "¿cada cuánto debe hacerse?" a "¿de qué depende?", que es lo que se
+  puede justificar en una propuesta. Les sugiero guardar este párrafo casi tal
+  cual para la descripción revisada (objetivo A).
+
+  Una precisión antes de seguir. Su estimación de "uno o dos segundos" depende
+  de la velocidad del usuario al escribir. En el kernel, en cambio, el periodo
+  del boost se va a expresar en ticks, así que van a necesitar saber cuánto dura
+  un tick en su versión de xv6. Anótenlo como cuestión pendiente: es un dato
+  que hay que buscar en el código, no algo para suponer.
+
+  Pasemos de la regla al kernel. Toda su variante depende de una medición:
+  cuánta CPU ha usado cada proceso en su nivel actual. En su síntesis dicen que
+  clockintr incrementa ticks y que usertrap y kerneltrap llaman a yield() en
+  cada interrupción del temporizador. Esa variable es un contador global del
+  sistema, no de cada proceso.
+
+  Vuelvan al proceso C y hagámoslo más realista: por cada tecla usa menos de un
+  tick de CPU, por ejemplo un tercio del intervalo entre dos interrupciones, y
+  se duerme antes de que llegue la siguiente interrupción.
+
+  Con lo que muestra su código, ¿quién "se entera" de que C usó la CPU, y en qué
+  momento? ¿Podría C pasar una eternidad en el nivel más alto aunque escriba
+  sin parar? ¿Y podría un proceso como B aprovechar lo mismo?
+
+  Para responder, péguenme el fragmento de usertrap en kernel/trap.c donde se
+  detecta la interrupción del temporizador y se llama a yield(), y también el
+  cuerpo de clockintr. Quiero ver qué hace realmente su versión antes de que
+  saquemos conclusiones.
+
+> Primero hay que aclarar algo: en el repositorio (rama
+  claude/clever-ramanujan-m352vq, último commit 8e406d6 Puntos 1-2-3 en
+  reporte.md) todavía no hay nada de MLFQ. kernel/trap.c es el de xv6 original
+  y no existe ningún campo de nivel, quantum o ticks por proceso. Un grep de
+  prior|level|quantum|mlfq|boost en kernel/ solo encuentra cosas del PLIC y de
+  la tabla de páginas. Estos son los fragmentos que pediste.
+
+  kernel/trap.c, usertrap (líneas 69–86):
+
+    } else if ((which_dev = devintr()) != 0) {
+      // ok
+    } else if ((r_scause() == 15 || r_scause() == 13) &&
+    ...
+    if (killed(p))
+      kexit(-1);
+
+    // give up the CPU if this is a timer interrupt.
+    if (which_dev == 2)
+      yield();
+
+  kernel/trap.c, clockintr (líneas 166–180):
+
+  void
+  clockintr()
+  {
+    if (cpuid() == 0) {
+      acquire(&tickslock);
+      ticks++;
+      wakeup(&ticks);
+      release(&tickslock);
+    }
+
+    // ask for the next timer interrupt. this also clears
+    // the interrupt request. 1000000 is about a tenth
+    // of a second.
+    w_stimecmp(r_time() + 1000000);
+  }
+
+  devintr devuelve 2 cuando scause == 0x8000000000000005 (la interrupción del
+  temporizador). Eso hace que usertrap llame a yield(). kerneltrap (línea 157)
+  hace lo mismo si la interrupción llega mientras se está en el kernel.
+
+  ¿Quién se entera de que C usó la CPU, y cuándo? En esta versión, nadie.
+  clockintr solo incrementa un contador global ticks (y solo en la CPU 0),
+  despierta a quienes esperan en sleep() y programa la siguiente interrupción.
+  No guarda nada sobre el proceso que estaba corriendo. Además, yield() se
+  llama en cada interrupción del reloj, así que el quantum real es de 1 tick
+  (unos 100 ms en QEMU), no de 10. Si agregamos la contabilidad de la forma más
+  natural, que sería algo como p->ticks_usados++ junto al yield(), el kernel
+  solo se enteraría del uso de CPU en el instante en que dispara el
+  temporizador, y se lo cobraría entero al proceso que esté corriendo en ese
+  momento. Eso es muestreo, no medición.
+
+  ¿Podría C quedarse para siempre en el nivel más alto? Sí. Un editor real
+  procesa una tecla en microsegundos, no en un tick completo. Si C despierta,
+  procesa la tecla y vuelve a dormir entre dos interrupciones del reloj, el
+  temporizador casi nunca lo encuentra corriendo y su contador casi nunca sube.
+  En este caso eso coincide con lo que queremos, pero ocurre por casualidad
+  del muestreo y no porque la regla lo garantice. Al revés, si C justo tiene
+  mala suerte, cada vez que lo encuentran le cobran un tick completo aunque
+  haya usado muy poco.
+
+  ¿Podría B aprovechar lo mismo? Sí, y es más grave. Un proceso puede
+  sincronizarse con el reloj: llama a sleep(1), despierta justo después de un
+  tick, calcula durante casi todo el intervalo y vuelve a dormirse un poco
+  antes del siguiente tick. El temporizador nunca lo encuentra en estado
+  RUNNING, así que nunca se le cobra nada. B se quedaría en el nivel más alto
+  usando cerca del 100% de la CPU, y la regla acumulada que propusimos no lo
+  evitaría, porque lo que acumula es cero. Hay otro hueco: si solo cobramos en
+  usertrap, el tiempo que B pase dentro de llamadas al sistema y que termine en
+  kerneltrap tampoco se cuenta.
+
+  Conclusión: para que la regla acumulada funcione, el uso de CPU hay que
+  medirlo, no muestrearlo. Por ejemplo, en scheduler() se puede leer r_time()
+  justo antes y justo después de swtch() y sumar la diferencia al proceso, sea
+  cual sea la razón por la que soltó la CPU (expropiación, sleep o E/S). Así C
+  acumula solo lo que de verdad usa, B no puede esconderse entre ticks, y el
+  periodo del boost se puede ajustar con datos reales.
+
+● Muy buen trabajo, y gracias por separar lo que observaron en el código de lo
+  que deducen. Antes de seguir, ordenemos lo que tienen:
+
+  - Observado en su código: clockintr solo incrementa ticks en la CPU 0,
+    despierta a quienes esperan en &ticks y programa la siguiente interrupción
+    para dentro de unos 100 ms. usertrap y kerneltrap llaman a yield() sin
+    condición en cada interrupción del temporizador. Por lo tanto, hoy el
+    quantum efectivo es de 1 tick.
+  - Hipótesis razonada, sin comprobar: que un proceso que llama a sleep(1) pueda
+    esconderse siempre entre dos ticks. Es plausible, pero sirve para un
+    escenario de prueba (objetivo C), no para afirmarlo en el reporte.
+  - Propuesta: medir con r_time() alrededor de swtch(). Anoten dos cosas para
+    verificar, porque no las sabemos todavía:
+    a. ¿El reloj que lee r_time() es el mismo en todas las CPU (harts), o cada
+       una tiene el suyo?
+    b. En scheduler(), ¿qué lock se tiene tomado alrededor de swtch()? ¿Basta
+       ese lock para proteger los campos nuevos de contabilidad cuando varias
+       CPU planifican a la vez?
+
+  Ahora aparece una regla que su descripción da por hecha. Ustedes escribieron
+  "siempre ejecuta los procesos de la cola más alta que no esté vacía". Al mismo
+  tiempo, su medición solo dice cuánto usó un proceso después de que soltó la
+  CPU. Lo único que puede quitarle la CPU a un proceso que no la suelta es la
+  interrupción del temporizador.
+
+  Un caso. A está en un nivel bajo, cuyo quantum ustedes deciden (pongamos 5
+  ticks), y acaba de empezar su turno. Una fracción de tick después, C despierta
+  porque llegó una tecla, y queda RUNNABLE en el nivel más alto.
+
+  En su variante, ¿qué debe hacer el kernel en cada interrupción del
+  temporizador? Comparen dos opciones con este caso. En la primera, sigue
+  llamando a yield() en cada tick, como hoy. En la segunda, solo lo llama cuando
+  el proceso actual agotó el quantum de su nivel.
+
+  Para cada opción díganme cuánto esperaría C, qué significaría entonces "el
+  quantum de un nivel" y si se cumple la frase "siempre ejecuta la cola más
+  alta". Después elijan una opción, o propongan una tercera, y justifiquen la
+  elección con lo que observaron en usertrap.
+
+> Hay un detalle de usertrap que decide este caso. Cuando llega la tecla, la
+  interrupción entra por devintr, que llama a uartintr (y de ahí a la consola y
+  a wakeup) y devuelve 1. El yield() solo se ejecuta con which_dev == 2:
+
+    // give up the CPU if this is a timer interrupt.
+    if (which_dev == 2)
+      yield();
+
+  Entonces, cuando C despierta, A sigue corriendo. C queda RUNNABLE, pero solo
+  cambia algo cuando llegue la siguiente interrupción del temporizador. Nada
+  más puede quitarle la CPU a A.
+
+  Opción 1: yield() en cada tick, como hoy
+  Cuánto espera C: menos de 1 tick, lo que falte para la siguiente interrupción
+  del reloj (como máximo unos 100 ms en QEMU). En ese tick A cede y
+  scheduler() elige la cola más alta no vacía, que es la de C.
+  Qué significa “el quantum de un nivel”: ya no es la duración de un turno,
+  porque todos los turnos duran como mucho 1 tick. Pasa a ser solo el
+  presupuesto de CPU acumulado antes de bajar de nivel. A puede volver a ser
+  elegido muchas veces seguidas, pero cada tick pasa por el planificador.
+  ¿”Siempre ejecuta la cola más alta”? Sí, con un retraso de hasta 1 tick. Es
+  la granularidad del reloj.
+  Costo: un cambio de contexto por tick aunque nadie más esté esperando, y el
+  quantum deja de servir para dar turnos largos a los procesos de abajo.
+  Opción 2: yield() solo cuando se agota el quantum del nivel
+  Cuánto espera C: hasta que A termine su quantum, casi 5 ticks (alrededor de
+  medio segundo en QEMU) por cada tecla. Para un editor eso se nota.
+  Qué significa “el quantum de un nivel”: la duración de un turno sin
+  interrupción, que también es lo que se cobra para bajar de nivel.
+  ¿”Siempre ejecuta la cola más alta”? No. Durante esos ticks hay un proceso
+  del nivel más alto RUNNABLE mientras corre uno de nivel bajo. Además, cuanto
+  más largo sea el quantum de los niveles bajos (que es justo lo que se suele
+  querer), peor responde C. Se pierde lo que el algoritmo intenta lograr.
+  Nuestra elección: una tercera opción
+
+  En cada interrupción del temporizador, llamar a yield() si el proceso actual
+  agotó su quantum o si hay algún proceso RUNNABLE en un nivel más alto que el
+  suyo. Con eso:
+
+  C espera como máximo lo que falta para el siguiente tick, igual que en la
+  opción 1.
+  El quantum vuelve a significar la duración del turno: si nadie más
+  prioritario espera, A corre sus 5 ticks seguidos sin cambios de contexto
+  inútiles.
+  La frase “siempre ejecuta la cola más alta” se cumple con un retraso de a lo
+  sumo 1 tick.
+  Como medimos el uso con r_time() alrededor de swtch(), A no pierde nada al
+  ser expropiado antes de tiempo. Se le cobra exactamente lo que usó y conserva
+  el resto de su presupuesto.
+
+  Si queremos que C no espere ni siquiera esa fracción de tick, se puede ir un
+  paso más allá, y es lo que mostró usertrap. El problema no es el
+  temporizador, es que solo el temporizador provoca yield(). Se puede poner una
+  marca (por ejemplo need_resched) en wakeup() cuando el proceso que despierta
+  tiene más prioridad que el actual. Después, en usertrap y kerneltrap, se
+  llama a yield() si which_dev == 2 y se cumple la condición anterior, o si esa
+  marca está activa, sea cual sea el dispositivo. Así la misma interrupción
+  del teclado que despierta a C le entrega la CPU de inmediato, y la regla se
+  cumple sin retraso.
+
+● Muy bien. La tercera opción resuelve el problema que tenían las otras dos: el
+  quantum vuelve a ser la duración del turno, y ningún proceso de nivel alto
+  queda esperando más de un tick detrás de uno de nivel bajo. Además la
+  justificaron con un dato que observaron en el código: solo which_dev == 2
+  provoca yield().
+
+  Antes de seguir, tres cosas para anotar:
+
+  1. Alcance. need_resched es un refinamiento que va más allá de la regla
+     mínima. En la propuesta pueden presentarlo como mejora opcional, con su
+     justificación, y dejar la tercera opción como el diseño base.
+  2. Una doble lectura que reapareció. Dicen que A "conserva el resto de su
+     presupuesto". Cuando A vuelva a ser elegido después de una expropiación,
+     ¿su turno dura el quantum completo o solo lo que le quedaba? Las dos
+     respuestas son válidas, pero tienen que escoger una y escribirla.
+  3. Costo. "Hay algún RUNNABLE en un nivel más alto" significa que, en cada
+     tick y desde el manejador de la trampa, alguien tiene que averiguarlo.
+     Anoten cómo se obtendría ese dato y con qué locks, como cuestión pendiente.
+
+  Ahora la pregunta de este turno. Tanto su descripción como su opción 3 dicen
+  "el proceso actual" y "la cola más alta", como si hubiera una sola CPU. xv6
+  corre en varias harts, y cada una ejecuta su propio scheduler() y tiene su
+  propio proceso actual.
+
+  Primero confirmen en su Makefile con cuántas CPU arranca QEMU (busquen CPUS).
+  Luego tomen este caso con dos CPU:
+
+  - La CPU 0 ejecuta a A, que está en un nivel bajo.
+  - La CPU 1 está ociosa dentro de su scheduler(), sin nada RUNNABLE.
+  - Llega la tecla, la interrupción la atiende la CPU 0 y C despierta en el
+    nivel más alto.
+
+  ¿Qué debería pasar según su regla, y qué pasaría con su need_resched tal como
+  lo describieron? ¿Hace falta expropiar a A? Ahora inviertan los papeles: la
+  CPU 1 ejecuta a un proceso de nivel bajo y la CPU 0 ejecuta a uno de nivel
+  alto. ¿A qué CPU debería avisarle wakeup()?
+
+  Con eso, reformulen la frase "siempre ejecuta los procesos de la cola más alta
+  que no esté vacía" para que tenga sentido con varias CPU.
+
+> ¿Cuántas CPU hay? El Makefile pone CPUS := 3, así que QEMU arranca con 3 CPU
+  (-smp 3). Solo hay una si se ejecuta make CPUS=1 qemu. Además, cualquier CPU
+  puede atender la interrupción del teclado.
+
+  Caso 1: la CPU 0 ejecuta a A (nivel bajo) y la CPU 1 está libre.
+
+  Lo correcto: C debería correr en la CPU 1. No hace falta sacar a A, porque
+  hay una CPU libre.
+  Lo que haría nuestro need_resched: compara a C con el proceso de la CPU que
+  atendió la tecla, que es A. Por eso la CPU 0 sacaría a A para poner a C, y A
+  quedaría esperando. La CPU 1 sigue dormida (wfi) y no se entera hasta su
+  siguiente tick, porque xv6 no tiene forma de que una CPU despierte a otra.
+  Resultado: se saca a A sin motivo y una CPU sigue sin hacer nada.
+
+  Caso 2: la CPU 0 ejecuta un proceso de nivel alto y la CPU 1 uno de nivel
+  bajo.
+
+  La tecla llega a la CPU 0. C no tiene más prioridad que el proceso de la CPU
+  0, así que need_resched no hace nada.
+  C solo consigue CPU cuando la CPU 1, en su siguiente tick, ve que hay alguien
+  más prioritario esperando. Funciona, pero tarda hasta 1 tick.
+
+  ¿A quién debería avisar wakeup()? No a la CPU que atendió la interrupción,
+  sino a la más conveniente:
+
+  Primero, a una CPU libre.
+  Si no hay ninguna libre, a la CPU que ejecuta el proceso de menor prioridad,
+  siempre que esa prioridad sea menor que la de C.
+  Si ninguna cumple eso, a nadie: C espera su turno.
+
+  La regla reformulada:
+
+  Con varias CPU, siempre deben estar corriendo los procesos de mayor
+  prioridad. Ninguna CPU debe estar libre ni ejecutar un proceso de prioridad
+  baja mientras otro de prioridad más alta espera. Se acepta un retraso de
+  hasta un tick.
+
+  Con una sola CPU esta regla dice lo mismo que la original.
+
+● Bien resuelto. La regla reformulada es clara y además se reduce a la original
+  cuando hay una sola CPU, que es una buena forma de comprobar que no la
+  cambiaron sin querer.
+
+  Sobre la evidencia:
+
+  - Observado: CPUS := 3 en el Makefile.
+  - Hipótesis por respaldar: "cualquier CPU puede atender la interrupción del
+    teclado" y "una CPU no puede despertar a otra". Para la primera, busquen en
+    el código del PLIC (plicinithart) qué hace cada hart. Para la segunda, digan
+    qué buscaron y no lo encontraron. "No existe" se justifica distinto que "lo
+    vi".
+
+  Fíjense también en algo que se desprende de su propia regla. Si aceptan un
+  retraso de hasta un tick, ¿la opción 3 sola ya la cumple en sus dos casos? En
+  el caso 1, la CPU 1 recibe su propio tick. Si la respuesta es sí, entonces
+  avisarle a la CPU más conveniente es una optimización que necesita un
+  mecanismo entre CPU que no tienen. Esa pieza encaja como cuestión pendiente o
+  fuera de alcance, no como un cambio necesario. Decidan ustedes y anótenlo.
+
+  Pasemos a otra frase de su descripción que todavía no hemos tocado: "Dentro de
+  cada cola los procesos se turnan con Round-Robin."
+
+  En su síntesis dicen que scheduler() recorre proc[NPROC] y elige el siguiente
+  RUNNABLE. Eso es un arreglo, no una cola. Supongan una selección de este tipo:
+  en cada decisión se recorre proc[] buscando un RUNNABLE del nivel más alto
+  que no esté vacío. Hay dos procesos intensivos, P en proc[1] y Q en proc[5],
+  los dos en el nivel más alto, y una sola CPU.
+
+  ¿El orden en que se recorre el arreglo cambia quién corre? ¿P y Q se turnan de
+  verdad o uno de los dos puede acaparar la CPU hasta bajar de nivel? Para
+  responder, péguenme el bucle de scheduler() de su versión y fíjense en dónde
+  empieza el recorrido cada vez que la CPU vuelve al planificador. Después
+  díganme qué tendría que cumplir la selección para que dentro de un nivel haya
+  Round-Robin de verdad. Describan la propiedad, no la implementación.
+
+> 1. ¿La opción 3 sola cumple la regla?
+
+  Sí, en los dos casos:
+
+  Caso 1: la CPU 1 está en wfi, pero tiene su propio temporizador. En su
+  siguiente tick despierta, vuelve a recorrer proc[], encuentra a C y lo
+  ejecuta. C espera como mucho 1 tick.
+  Caso 2: en el siguiente tick de la CPU 1, su proceso de nivel bajo ve que hay
+  alguien de nivel más alto esperando y cede la CPU. C espera como mucho 1
+  tick.
+
+  Un detalle: los ticks de cada CPU no están sincronizados. En el caso 1, si a
+  la CPU 0 le llega su tick antes que a la CPU 1, la opción 3 sacaría a A sin
+  necesidad, y A tendría que esperar hasta el tick de la CPU 1. Es un cambio de
+  contexto desperdiciado, pero no rompe la regla, porque nadie espera más de
+  un tick.
+
+  Decisión: la opción 3 es el cambio necesario. Descartamos need_resched y el
+  aviso a la CPU más conveniente como parte del diseño, porque solo reducen el
+  retraso por debajo de un tick y para eso harían falta interrupciones entre
+  CPU, que xv6 no tiene. La nota para el reporte quedaría así:
+
+  Fuera de alcance: avisar desde wakeup() a una CPU libre o a la que ejecuta el
+  proceso de menor prioridad. Reduciría el retraso por debajo de un tick y
+  evitaría algunas expropiaciones innecesarias, pero requiere interrupciones
+  entre procesadores, que xv6 no tiene. La revisión en cada tick (opción 3) ya
+  cumple la regla con un retraso máximo de un tick.
+
+  Por ahora solo te la dejo aquí. No la agregué a reporte.md; si quieres, la
+  añado.
+
+  2. El bucle de scheduler() (kernel/proc.c:429–469)
+       for (;;) {
+      intr_on();
+      intr_off();
+
+      int found = 0;
+      for (p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+        if (p->state == RUNNABLE) {
+      p->state = RUNNING;
+      c->proc = p;
+      swtch(&c->context, &p->context);
+
+      mycpu()->intena = 0;
+
+      c->proc = 0;
+      found = 1;
+        }
+        release(&p->lock);
+      }
+      if (found == 0) {
+        asm volatile("wfi");
+      }
+    }
+
+  En el xv6 original el Round-Robin sale casi gratis. Cuando el proceso cede y
+  swtch() regresa, el for interior sigue desde p + 1, no desde el principio.
+  Así, con P en proc[1] y Q en proc[5], la secuencia es: corre P, se sigue
+  buscando desde proc[2], corre Q, se llega al final del arreglo, se vuelve a
+  proc[0] y corre P otra vez. Se turnan.
+
+  3. Con la selección propuesta
+
+  Si en cada decisión se recorre proc[] desde el principio buscando el primer
+  RUNNABLE del nivel más alto, el orden del arreglo sí cambia quién corre:
+
+  P está antes en el arreglo, así que gana todas las decisiones. Cede en cada
+  tick, vuelve a estar RUNNABLE y en la siguiente decisión es otra vez el
+  primero que se encuentra.
+  Q no corre nunca mientras P siga en el nivel más alto. P acapara la CPU hasta
+  agotar su presupuesto y bajar de nivel. Solo entonces corre Q.
+  Cuando los dos estén en el mismo nivel más abajo, o después de un boost, pasa
+  lo mismo: otra vez gana P.
+
+  No hay turnos: cada proceso corre su presupuesto completo, uno detrás del
+  otro. La prioridad real dentro de un nivel queda decidida por la posición en
+  proc[], algo arbitrario que depende de qué entrada quedó libre cuando se creó
+  el proceso.
+
+  4. Qué debe cumplir la selección para que haya Round-Robin de verdad
+
+  Dentro de un mismo nivel:
+
+  Se elige por orden de llegada, no por posición. Entre los procesos listos de
+  un nivel, corre el que lleva más tiempo esperando en ese nivel.
+  Quien deja la CPU va al final de la fila. Da igual si fue expropiado, agotó
+  su quantum o volvió de una E/S: queda detrás de los que ya estaban esperando
+  en ese nivel.
+  Todos corren una vez antes de que alguno repita. Si hay k procesos listos en
+  un nivel y no llega nadie de más arriba, cada uno espera como mucho k − 1
+  turnos.
+  No depende de dónde esté el proceso en proc[]. Si se intercambian dos
+  entradas del arreglo, el orden de ejecución no cambia.
+
+● Muy buen análisis del bucle. La explicación de por qué hoy el Round-Robin
+  "sale casi gratis" (el for sigue desde p + 1 cuando swtch() regresa) es
+  exactamente el tipo de evidencia de código que pide el objetivo B. Y las
+  cuatro propiedades que dieron definen un Round-Robin justo sin decir cómo
+  implementarlo.
+
+  Sobre reporte.md: el reporte es de ustedes, así que agregar la nota lo deciden
+  ustedes. Yo solo puedo decirles que está bien argumentada.
+
+  Ahora una revisión de consistencia. En el punto 3 escribieron "P cede en cada
+  tick, vuelve a estar RUNNABLE…". Eso describe la opción 1. Pero acaban de
+  elegir la opción 3, en la que un proceso no cede en cada tick: cede solo si
+  agota su quantum o si espera alguien de un nivel más alto. Además, hace dos
+  turnos quedó abierta una decisión que afecta este caso: ¿el quantum de un
+  nivel (la duración del turno) y el presupuesto para bajar de nivel son la
+  misma cantidad, o son distintas?
+
+  Rehagan entonces la traza de P (proc[1]) y Q (proc[5]) con una sola CPU, la
+  opción 3 y la selección "primer RUNNABLE del nivel más alto, recorriendo desde
+  el principio". Escriban explícitamente lo que decidan sobre quantum y
+  presupuesto. Síganla hasta que los dos estén en el nivel más bajo.
+
+  ¿Qué pasa cuando P agota su quantum en el último nivel, donde ya no puede
+  bajar más? ¿Qué le pasa a Q? Su descripción inicial dice qué ocurre al agotar
+  el quantum ("baja de nivel"), pero no qué ocurre cuando no hay nivel inferior.
+  Propongan esa regla y justifiquen si basta el boost para proteger a Q o si
+  hace falta algo más.
+
+> 1. ¿La opción 3 sola cumple la regla?
+
+  Sí, en los dos casos:
+
+  Caso 1: la CPU 1 está en wfi, pero tiene su propio temporizador. En su
+  siguiente tick despierta, vuelve a recorrer proc[], encuentra a C y lo
+  ejecuta. C espera como mucho 1 tick.
+  Caso 2: en el siguiente tick de la CPU 1, su proceso de nivel bajo ve que hay
+  alguien de nivel más alto esperando y cede la CPU. C espera como mucho 1
+  tick.
+
+  Un detalle: los ticks de cada CPU no están sincronizados. En el caso 1, si a
+  la CPU 0 le llega su tick antes que a la CPU 1, la opción 3 sacaría a A sin
+  necesidad, y A tendría que esperar hasta el tick de la CPU 1. Es un cambio de
+  contexto desperdiciado, pero no rompe la regla, porque nadie espera más de
+  un tick.
+
+  Decisión: la opción 3 es el cambio necesario. Descartamos need_resched y el
+  aviso a la CPU más conveniente como parte del diseño, porque solo reducen el
+  retraso por debajo de un tick y para eso harían falta interrupciones entre
+  CPU, que xv6 no tiene. La nota para el reporte quedaría así:
+
+  Fuera de alcance: avisar desde wakeup() a una CPU libre o a la que ejecuta el
+  proceso de menor prioridad. Reduciría el retraso por debajo de un tick y
+  evitaría algunas expropiaciones innecesarias, pero requiere interrupciones
+  entre procesadores, que xv6 no tiene. La revisión en cada tick (opción 3) ya
+  cumple la regla con un retraso máximo de un tick.
+
+  Por ahora solo te la dejo aquí. No la agregué a reporte.md; si quieres, la
+  añado.
+
+  2. El bucle de scheduler() (kernel/proc.c:429–469)
+       for (;;) {
+      intr_on();
+      intr_off();
+
+      int found = 0;
+      for (p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+        if (p->state == RUNNABLE) {
+      p->state = RUNNING;
+      c->proc = p;
+      swtch(&c->context, &p->context);
+
+      mycpu()->intena = 0;
+
+      c->proc = 0;
+      found = 1;
+        }
+        release(&p->lock);
+      }
+      if (found == 0) {
+        asm volatile("wfi");
+      }
+    }
+
+  En el xv6 original el Round-Robin sale casi gratis. Cuando el proceso cede y
+  swtch() regresa, el for interior sigue desde p + 1, no desde el principio.
+  Así, con P en proc[1] y Q en proc[5], la secuencia es: corre P, se sigue
+  buscando desde proc[2], corre Q, se llega al final del arreglo, se vuelve a
+  proc[0] y corre P otra vez. Se turnan.
+
+  3. Con la selección propuesta
+
+  Si en cada decisión se recorre proc[] desde el principio buscando el primer
+  RUNNABLE del nivel más alto, el orden del arreglo sí cambia quién corre:
+
+  P está antes en el arreglo, así que gana todas las decisiones. Cede en cada
+  tick, vuelve a estar RUNNABLE y en la siguiente decisión es otra vez el
+  primero que se encuentra.
+  Q no corre nunca mientras P siga en el nivel más alto. P acapara la CPU hasta
+  agotar su presupuesto y bajar de nivel. Solo entonces corre Q.
+  Cuando los dos estén en el mismo nivel más abajo, o después de un boost, pasa
+  lo mismo: otra vez gana P.
+
+  No hay turnos: cada proceso corre su presupuesto completo, uno detrás del
+  otro. La prioridad real dentro de un nivel queda decidida por la posición en
+  proc[], algo arbitrario que depende de qué entrada quedó libre cuando se creó
+  el proceso.
+
+  4. Qué debe cumplir la selección para que haya Round-Robin de verdad
+
+  Dentro de un mismo nivel:
+
+  Se elige por orden de llegada, no por posición. Entre los procesos listos de
+  un nivel, corre el que lleva más tiempo esperando en ese nivel.
+  Quien deja la CPU va al final de la fila. Da igual si fue expropiado, agotó
+  su quantum o volvió de una E/S: queda detrás de los que ya estaban esperando
+  en ese nivel.
+  Todos corren una vez antes de que alguno repita. Si hay k procesos listos en
+  un nivel y no llega nadie de más arriba, cada uno espera como mucho k − 1
+  turnos.
+  No depende de dónde esté el proceso en proc[]. Si se intercambian dos
+  entradas del arreglo, el orden de ejecución no cambia.
+
+● Este mensaje es el mismo que me enviaron en el turno anterior; seguramente se
+  pegó el texto que no era. Ya lo comenté, así que no lo repito.
+
+  La pregunta pendiente es esta:
+
+  Rehagan la traza de P (proc[1]) y Q (proc[5]) con:
+
+  - una sola CPU,
+  - la opción 3: se cede solo al agotar el quantum o si espera alguien de un
+    nivel más alto, no en cada tick,
+  - la selección "primer RUNNABLE del nivel más alto, recorriendo proc[] desde
+    el principio".
+
+  Antes de empezar, escriban explícitamente qué decidieron: ¿el quantum de un
+  nivel (la duración del turno) y el presupuesto para bajar de nivel son la
+  misma cantidad o son distintas?
+
+  Sigan la traza hasta que los dos estén en el nivel más bajo y díganme qué pasa
+  cuando P agota su quantum en el último nivel, donde no puede bajar más, y qué
+  le pasa entonces a Q. Luego propongan la regla que falta en su descripción
+  para ese caso y justifiquen si el boost basta para proteger a Q.
+
+> Lo que decidimos: el quantum de un nivel y el presupuesto para bajar de nivel
+  son la misma cantidad. Cada nivel tiene un solo número. Cuando un proceso
+  gasta ese tiempo, sumando todos sus turnos en ese nivel, baja.
+
+  Para la traza usamos 3 niveles: nivel 0 = 10 ticks, nivel 1 = 20 ticks, nivel
+  2 = 40 ticks.
+
+  Traza (una CPU, opción 3, se elige el primer RUNNABLE del nivel más alto
+  recorriendo proc[] desde el principio):
+
+  Ticks   Corre   Qué pasa
+  0–10    P       P y Q están en el nivel 0. P aparece primero en proc[]. Nadie
+  de más arriba espera, así que P corre sus 10 ticks seguidos y baja al nivel
+  1.
+  10–20   Q       Q es el único en el nivel 0. Corre 10 ticks y baja al nivel
+  1.
+  20–40   P       Los dos están en el nivel 1. P aparece primero. Corre 20
+  ticks y baja al nivel 2.
+  40–60   Q       Q es el único en el nivel 1. Corre 20 ticks y baja al nivel
+  2.
+  60–100  P       Los dos están en el nivel 2. P aparece primero y corre 40
+  ticks.
+
+  Qué pasa cuando P agota su quantum en el último nivel: P no puede bajar más,
+  así que sigue RUNNABLE en el nivel 2. En la siguiente elección se recorre
+  proc[] desde el principio y P vuelve a aparecer primero. P corre otra vez, y
+  otra vez, sin parar.
+
+  Qué le pasa a Q: no vuelve a correr. Queda sin CPU aunque está en el mismo
+  nivel que P.
+
+  La regla que falta:
+
+  Si un proceso agota su quantum en el último nivel, se queda en ese nivel, su
+  contador vuelve a cero y pasa al final de la fila de ese nivel.
+
+  Con esta regla, desde el tick 60 P y Q se turnan: P 40, Q 40, P 40, y así.
+
+  ¿Basta el boost para proteger a Q? No. El boost sube a los dos al nivel 0 y
+  la traza se repite igual: Q recibe 10 + 20 = 30 ticks y P se queda con todo
+  el resto hasta el siguiente boost. El boost evita que Q espere para siempre,
+  pero no reparte la CPU de forma justa. Además, cuanto más largo sea el
+  periodo del boost, menos CPU recibe Q. Hace falta también el Round-Robin
+  dentro del nivel: el boost protege a los de abajo frente a los de arriba, y
+  el Round-Robin reparte la CPU entre los del mismo nivel.
+  Cúantas preguntas faltan?
+
+● Llevan siete preguntas y les quedan entre seis y ocho más, según cuánto haya
+  que ajustar en cada parte. En cada etapa la pregunta es suya; lo que les doy
+  es solo el orden:
+
+  1. Una pregunta más sobre la descripción (la de este turno). Es la última
+     regla ambigua importante que veo.
+  2. Objetivo A: redactan la descripción revisada y yo la reviso con uno o dos
+     casos.
+  3. Objetivo B: relacionan cada regla con su cambio en xv6, con propósito y
+     evidencia. Unas dos preguntas.
+  4. Objetivo C: proponen escenarios de prueba. Unas dos preguntas.
+  5. Cierre: redactan conclusiones y les hago una última pregunta sobre un caso
+     concreto.
+
+  Sobre su respuesta: la traza es correcta, también la cuenta de 30 ticks para Q
+  después del boost. La conclusión es la más importante hasta ahora: el boost
+  protege a los niveles bajos frente a los altos, y el Round-Robin reparte la
+  CPU dentro de cada nivel. Son dos mecanismos con propósitos distintos, y
+  ninguno reemplaza al otro. Dejen también por escrito que quantum = presupuesto
+  acumulado. Con eso se cierra la duda de hace dos turnos: un proceso
+  expropiado vuelve con lo que le quedaba.
+
+  Pregunta de este turno. Su descripción dice "Todo proceso nuevo entra en la
+  cola más alta", y en la síntesis anotaron que kfork "define qué prioridad
+  recibe" el hijo.
+
+  Piensen en un proceso D, intensivo en cómputo. Cada 9 ticks hace fork(); el
+  hijo continúa el trabajo y el padre termina con exit(). Lo repite
+  indefinidamente.
+
+  Con su regla actual, ¿en qué nivel corre siempre "el trabajo" de D y qué les
+  pasa a los demás procesos? Propongan qué nivel debería recibir un hijo y
+  justifíquenlo. Tengan en cuenta que un shell también hace fork() para lanzar
+  cada comando interactivo, y que su regla no debería castigar ese caso.
+
+  Para apoyar la propuesta con evidencia, péguenme kfork() y la parte de
+  allocproc() donde se inicializan los campos del proceso. Así vemos dónde se
+  decide hoy el estado inicial de un hijo y qué copia del padre.
+
+> allocproc() (kernel/proc.c:110), la parte donde se preparan los campos:
+
+  found:
+    p->pid = allocpid();
+    p->state = USED;
+
+    // Allocate a trapframe page.
+    if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
+      ...
+    }
+
+    // An empty user page table.
+    p->pagetable = proc_pagetable(p);
+    ...
+
+    memset(&p->context, 0, sizeof(p->context));
+    p->context.ra = (uint64)forkret;
+    p->context.sp = p->kstack + PGSIZE;
+
+    return p;
+
+  kfork() (kernel/proc.c:259):
+
+    if ((np = allocproc()) == 0) {
+      return -1;
+    }
+
+    // Copy user memory from parent to child.
+    if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0) {
+      ...
+    }
+    np->sz = p->sz;
+
+    // copy saved user registers.
+    *(np->trapframe) = *(p->trapframe);
+
+    // Cause fork to return 0 in the child.
+    np->trapframe->a0 = 0;
+
+    for (i = 0; i < NOFILE; i++)
+      if (p->ofile[i])
+        np->ofile[i] = filedup(p->ofile[i]);
+    np->cwd = idup(p->cwd);
+
+    safestrcpy(np->name, p->name, sizeof(p->name));
+
+    pid = np->pid;
+    release(&np->lock);
+
+    acquire(&wait_lock);
+    np->parent = p;
+    release(&wait_lock);
+
+    acquire(&np->lock);
+    np->state = RUNNABLE;
+    release(&np->lock);
+
+  Qué muestra:
+
+  allocproc() solo prepara lo básico: pid, estado, trapframe, tabla de páginas
+  y contexto.
+  kfork() copia del padre la memoria, los registros, los archivos abiertos, el
+  directorio y el nombre, y al final deja al hijo RUNNABLE.
+  Hoy no se copia nada del planificador, porque no existe. Esos dos lugares son
+  donde se decidiría el nivel del hijo.
+  Qué pasa con D con la regla actual
+  Cada hijo entra en el nivel más alto con su contador en cero.
+  Cada uno gasta 9 de sus 10 ticks, hace fork() y termina. Ninguno llega a 10.
+  El trabajo de D corre siempre en el nivel más alto, aunque es intensivo en
+  cómputo.
+  Los procesos de niveles bajos (como A y B) solo corren cuando D no está
+  listo, que es casi nunca. Con una sola CPU se quedan casi sin nada.
+  El boost tampoco ayuda mucho. Los sube un rato, gastan su quantum y vuelven a
+  bajar, mientras D sigue arriba. Es el mismo truco que hacía B, pero ahora el
+  contador se reinicia cambiando de proceso.
+  Qué nivel debería recibir el hijo
+
+  El hijo hereda el nivel del padre y también el tiempo que el padre ya gastó
+  en ese nivel. Entra al final de la fila de ese nivel.
+
+  Por qué:
+
+  Con D: cada hijo sigue la cuenta donde la dejó el padre. Después de 10 ticks
+  en total el trabajo baja de nivel, igual que si fuera un solo proceso.
+  Hay que heredar también el contador. Si el hijo heredara solo el nivel con el
+  contador en cero, D nunca bajaría del nivel en el que empezó, que es el más
+  alto.
+  Con el shell: el shell pasa casi todo el tiempo esperando teclas, así que
+  está en el nivel más alto y ha gastado muy poco. Su hijo (el comando) empieza
+  también arriba y casi sin nada gastado. El comando interactivo no se
+  castiga. Si después resulta intensivo, bajará por su propio uso.
+  “Todo proceso nuevo entra en la cola más alta” pasa a valer solo para el
+  primer proceso (userinit), que no tiene padre.
+
+  Dónde iría en el código:
+
+  En allocproc(): dejar nivel 0 y contador en 0 como valores iniciales, para
+  que userinit empiece bien.
+  En kfork(): copiar del padre el nivel y el contador, junto con lo demás que
+  ya se copia, antes de np->state = RUNNABLE.
+
+● Su propuesta es coherente con el resto del diseño: el contador heredado tapa
+  este hueco de la misma forma que el contador acumulado tapó el de B. Y la
+  evidencia del código es justo la que se necesita. allocproc() define el estado
+  inicial de cualquier proceso y kfork() es donde el hijo ya copia del padre
+  todo lo demás.
+
+  Una cosa para anotar como pendiente, no para resolver ahora. Heredar el
+  contador evita la cadena de forks de D, pero ¿qué pasa si D crea varios hijos
+  casi al mismo tiempo? Cada uno heredaría el mismo contador y, por tanto, el
+  mismo presupuesto restante. Escriban si les parece un problema real o si lo
+  dejan fuera de alcance.
+
+  Con esto terminamos de revisar la descripción. Pregunta de este turno
+  (objetivo A):
+
+  Redacten su descripción revisada de la variante de MLFQ, con sus palabras.
+  Sugerencia de formato: reglas numeradas y breves, y después un párrafo que
+  explique para qué sirve cada mecanismo. Incluyan las decisiones que tomaron en
+  esta conversación. Para lo que todavía no está decidido (cuántos niveles hay,
+  qué quantum tiene cada uno, el periodo del boost en ticks y cuánto dura un
+  tick), marquen claramente que es un valor pendiente y digan de qué depende.
+
+  Respondan también, en una línea cada una, las cuatro dudas con las que
+  empezaron:
+
+  - cuántas colas y qué quantum,
+  - cada cuánto el boost,
+  - si un proceso puede engañar al planificador,
+  - qué pasa con un proceso que cambia de comportamiento.
+
+  Esta vez no la voy a corregir párrafo por párrafo. La voy a poner a prueba con
+  un caso pequeño, y ustedes van a comprobar si sus reglas, tal como las
+  escribieron, deciden sin ambigüedad qué proceso corre.
+
+> Descripción revisada de nuestra variante de MLFQ
+  Reglas
+  Niveles. Hay varios niveles de prioridad. El nivel 0 es el más alto. Cada
+  nivel tiene una fila de procesos listos.
+  Un solo número por nivel. Cada nivel tiene un quantum. Ese quantum es a la
+  vez lo que puede durar un turno y el presupuesto para bajar de nivel.
+  Medición acumulada. El kernel mide el tiempo real que cada proceso usa la CPU
+  en su nivel actual, leyendo el reloj al entrar y al salir de la CPU. El
+  tiempo se suma entre turnos y no se reinicia porque el proceso ceda la CPU,
+  haga E/S o sea expropiado.
+  Bajar de nivel. Cuando el tiempo acumulado llega al quantum del nivel, el
+  proceso baja un nivel, su contador vuelve a cero y entra al final de la fila
+  del nuevo nivel.
+  Último nivel. Si un proceso agota su quantum en el último nivel, se queda en
+  ese nivel, su contador vuelve a cero y pasa al final de la fila.
+  Elección. Cuando una CPU queda libre, toma el primer proceso de la fila del
+  nivel más alto que no esté vacía.
+  Fila (Round-Robin). Un proceso entra al final de la fila de su nivel cada vez
+  que deja la CPU, ya sea por expropiación, por agotar el quantum o por volver
+  de una E/S. La posición en proc[] no influye en el orden.
+  Qué se revisa en cada tick. En cada interrupción del temporizador, cada CPU
+  revisa su proceso actual, contando también el tiempo del turno en curso. Lo
+  saca de la CPU solo si agotó su quantum o si hay un proceso listo en un nivel
+  más alto. Si no, lo deja seguir.
+  Varias CPU. Siempre deben correr los procesos de mayor prioridad. Ninguna CPU
+  debe estar libre ni ejecutar un proceso de nivel bajo mientras uno de nivel
+  más alto espera. Se acepta un retraso de hasta un tick, porque cada CPU solo
+  se entera en su propio tick.
+  Dormir y despertar. Un proceso que se duerme (E/S, sleep) conserva su nivel y
+  su contador. Al despertar entra al final de la fila de su nivel.
+  Procesos nuevos. El primer proceso (userinit) empieza en el nivel 0 con el
+  contador en cero. Todo hijo creado con fork() hereda el nivel del padre y su
+  contador, y entra al final de la fila de ese nivel.
+  Boost. Cada cierto número de ticks, todos los procesos, listos, corriendo o
+  dormidos, pasan al nivel 0 y su contador vuelve a cero. En la fila del nivel
+  0 quedan en este orden: primero los que ya estaban en el nivel 0, luego los
+  del nivel 1, y así hasta el último, manteniendo el orden que tenían dentro de
+  cada fila.
+  Valores pendientes
+  Valor   Estado  De qué depende
+  Número de niveles       pendiente (en los ejemplos usamos 3)    De cuántos
+  tipos de comportamiento queramos distinguir. Más niveles dan más detalle,
+  pero hacen más difícil la prueba.
+  Quantum de cada nivel   pendiente (en los ejemplos usamos 10, 20 y 40 ticks)
+    Arriba debe ser corto para que los interactivos respondan rápido. Abajo
+  debe ser largo para que los intensivos no cambien de CPU todo el tiempo.
+  Periodo del boost       pendiente       Debe ser parecido al tiempo que tarda
+  un proceso interactivo en gastar el quantum del nivel 0. Si es muy corto,
+  todo se vuelve un Round-Robin simple. Si es muy largo, los de abajo esperan
+  demasiado.
+  Duración de un tick     pendiente (hoy clockintr usa 1000000 ciclos, unos 0,1
+  s en QEMU)        De cuánto retraso aceptamos (regla 9) frente al costo de
+  atender más interrupciones.
+  Para qué sirve cada mecanismo
+
+  La medición acumulada (regla 3) evita que un proceso como B se quede arriba
+  cediendo la CPU justo antes de agotar su quantum, y como mide tiempo real,
+  tampoco puede esconderse entre ticks. Los niveles con bajada (regla 4)
+  separan a los procesos interactivos de los intensivos según cuánto usan la
+  CPU de verdad. La fila por nivel (reglas 5 y 7) reparte la CPU de forma justa
+  entre procesos del mismo nivel, incluido el último. La revisión en cada tick
+  (regla 8) hace que un proceso de nivel alto que despierta no espere más de
+  un tick, sin cambios de contexto inútiles cuando nadie espera. El boost
+  (regla 12) protege a los procesos de niveles bajos frente a los de arriba y
+  hace que el planificador olvide el pasado, para que un proceso que se vuelve
+  interactivo recupere su prioridad. La herencia en fork() (regla 11) evita que
+  un proceso intensivo se quede arriba creando hijos, sin castigar al shell,
+  que está arriba porque casi no usa CPU.
+
+  Pendientes y fuera de alcance
+  Avisar a otra CPU desde wakeup(): fuera de alcance. Bajaría el retraso por
+  debajo de un tick, pero necesita interrupciones entre CPU, que xv6 no tiene.
+  La regla 8 ya cumple la regla 9.
+  Varios hijos creados casi al mismo tiempo: fuera de alcance. Cada hijo hereda
+  el mismo presupuesto restante, así que N hijos reciben en conjunto N veces
+  ese presupuesto. Pero cada hijo es un proceso real que compite como cualquier
+  otro, igual que si el usuario lanzara N programas. Las reglas 4 y 12 siguen
+  aplicando a cada uno, así que no es un truco nuevo para quedarse arriba
+  indefinidamente.
+  Respuestas a las cuatro dudas iniciales
+  Cuántas colas y qué quantum: pendiente. El quantum crece al bajar de nivel, y
+  quantum = presupuesto acumulado.
+  Cada cuánto el boost: pendiente. Debe ser del orden del tiempo que tarda un
+  interactivo en gastar el quantum del nivel 0.
+  Si un proceso puede engañar al planificador: con medición acumulada de tiempo
+  real y herencia del contador en fork(), ya no puede con los trucos que
+  vimos.
+  Qué pasa con un proceso que cambia de comportamiento: si se vuelve intensivo,
+  baja por su uso. Si se vuelve interactivo, recupera la prioridad en el
+  siguiente boost.
+
+● Es una descripción sólida: las reglas son verificables y cada mecanismo tiene
+  su justificación. El argumento sobre los N hijos ("es lo mismo que si el
+  usuario lanzara N programas") también es razonable para dejarlo fuera de
+  alcance. Ahora vamos a ponerla a prueba, como les dije.
+
+  Caso de prueba. Una CPU, niveles de 10, 20 y 40 ticks, y un boost cada 100
+  ticks (el siguiente ocurre en el tick 100).
+
+  Estado en el tick 95:
+
+  ┌─────────┬───────┬──────────┬─────────────────────────────────────────────┐
+  │ Proceso │ Nivel │ Contador │                   Estado                    │
+  ├─────────┼───────┼──────────┼─────────────────────────────────────────────┤
+  │ A       │ 2     │ 30       │ RUNNING (acaba de empezar su turno en el    │
+  │         │       │          │ tick 95)                                    │
+  ├─────────┼───────┼──────────┼─────────────────────────────────────────────┤
+  │ Q       │ 2     │ 0        │ RUNNABLE, primero en la fila del nivel 2    │
+  ├─────────┼───────┼──────────┼─────────────────────────────────────────────┤
+  │ C       │ 0     │ 8        │ SLEEPING, esperando una tecla               │
+  └─────────┴───────┴──────────┴─────────────────────────────────────────────┘
+
+  En el tick 97,5, entre dos interrupciones, llega una tecla y C despierta.
+  Desde ese momento C quiere CPU sin parar: el usuario mantiene pulsada una
+  tecla y siempre hay trabajo pendiente.
+
+  Hagan la traza desde el tick 95 hasta el 115. En cada decisión indiquen quién
+  corre, el nivel y el contador de cada proceso, cómo está cada fila y qué
+  número de regla usaron.
+
+  Hay un momento en el que sus reglas, tal como están escritas, no deciden un
+  único resultado. Encuéntrenlo, expliquen qué dos lecturas son posibles y
+  elijan una corrigiendo la regla correspondiente.
+
+> Traza del tick 95 al 115
+
+  Notación: (nivel, contador). Las filas se muestran como F0, F1 y F2.
+
+  Tick    Qué pasa        Corre   A       Q       C       Filas   Reglas
+  95      A empieza su turno      A       (2, 30) (2, 0)  (0, 8) dormido  F0 =
+  [ ], F1 = [ ], F2 = [Q]    6
+  96      Tick. A lleva 31 < 40 y nadie más alto espera   A       (2, 31) (2,
+  0)  (0, 8) dormido  F2 = [Q]        8
+  97      Tick. A lleva 32 < 40 y nadie más alto espera   A       (2, 32) (2,
+  0)  (0, 8) dormido  F2 = [Q]        8
+  97,5    Llega la tecla y C despierta. No es un tick, así que A sigue    A
+    (2, 32,5)       (2, 0)  (0, 8) listo    F0 = [C], F2 = [Q]      10, 8
+  98      Tick. A lleva 33 < 40, pero C espera en un nivel más alto: A sale y
+  va al final de F2 con su contador   C       (2, 33) (2, 0)  (0, 8)  F0 = [ ],
+  F2 = [Q, A]   8, 7, 3, 6
+  99      Tick. C lleva 9 < 10 y nadie más alto espera    C       (2, 33) (2,
+  0)  (0, 9)  F2 = [Q, A]     8
+  100     Tick. C llega a 10 y además toca el boost       ?
+                    4, 8, 12
+  El momento ambiguo: el tick 100
+
+  En el mismo tick se cumplen dos reglas: C agota su quantum (reglas 4 y 8) y
+  toca el boost (regla 12). Las reglas no dicen cuál va primero ni dónde queda
+  el proceso que estaba corriendo.
+
+  Lectura 1: primero el boost. C vuelve a nivel 0 con contador 0. Luego la
+  regla 8 ve que C lleva 0 < 10 y nadie más alto espera, así que C sigue
+  corriendo. Corre hasta el tick 110 y solo entonces le toca a Q.
+  Lectura 2: primero la revisión del tick. C agotó su quantum y deja la CPU.
+  Según la regla 7, entra al final de una fila. Después del boost todos están
+  en el nivel 0 y la fila queda [Q, A, C], así que corre Q.
+
+  Con las mismas reglas, en el tick 100 puede correr C o puede correr Q.
+
+  Elegimos la lectura 2. El boost sirve para proteger a los que esperan abajo.
+  Q lleva mucho tiempo esperando en el nivel 2, y C acaba de gastar su quantum
+  completo. No es justo que C gane también el primer turno después del boost.
+
+  Regla 12 corregida:
+
+  Boost. Cada cierto número de ticks, todos los procesos pasan al nivel 0 con
+  el contador en cero. En ese tick, primero se hace la revisión de la regla 8 y
+  después el boost. La fila del nivel 0 queda así: primero los que estaban en
+  filas, del nivel 0 al último y en su orden. Al final va el proceso que dejó
+  la CPU en ese tick, si lo hubo. Si el proceso actual no tenía que dejar la
+  CPU, sigue corriendo.
+  La traza sigue con la regla corregida
+  Tick    Qué pasa        Corre   A       Q       C       Filas   Reglas
+  100     C agota su quantum y deja la CPU. Luego el boost pone a todos en (0,
+  0). Q y A van primero (estaban en F2) y C al final Q       (0, 0)  (0, 0)
+  (0, 0)  F0 = [A, C]     8, 12, 6
+  101–109 Ticks. Q lleva menos de 10 y nadie de un nivel más alto espera (A y C
+  están en su mismo nivel)  Q       (0, 0)  (0, 1…9)        (0, 0)  F0 = [A,
+  C]     8
+  110     Q llega a 10, baja al nivel 1 y va a F1 A       (0, 0)  (1, 0)  (0,
+  0)  F0 = [C], F1 = [Q]      8, 4, 6
+  111–114 Ticks. A lleva menos de 10 y nadie más alto espera      A       (0,
+  1…4)        (1, 0)  (0, 0)  F0 = [C], F1 = [Q]      8
+  115     A lleva 5 y sigue corriendo     A       (0, 5)  (1, 0)  (0, 0)  F0 =
+  [C], F1 = [Q]      8
+
+  En el tick 115 corre A. C es el siguiente en la fila del nivel 0 y Q espera
+  en el nivel 1. Ahora que C usa la CPU sin parar, se le trata como a cualquier
+  proceso intensivo: espera su turno en la fila.
+
+● La traza es correcta y encontraron la ambigüedad que buscaba: en un mismo tick
+  se cumplen dos reglas y el texto no dice cuál se aplica primero. La regla
+  corregida la resuelve, y la eligieron por el propósito del boost y no por
+  comodidad. También es buena la observación final: si C se vuelve intensivo,
+  las reglas lo tratan como intensivo. Eso responde con un ejemplo concreto a su
+  cuarta duda.
+
+  Un detalle para el reporte. En el tick 98 calcularon el contador de A como 33
+  porque corrió del 95 al 98. Su regla 3 mide tiempo real, así que si en un
+  escenario de prueba ese número sale distinto, el problema está en la medición.
+  Ese tipo de cuenta exacta les va a servir en el objetivo C.
+
+  Con esto la descripción revisada queda cerrada (objetivo A). Pasamos al
+  objetivo B.
+
+  Ya mencionaron varios lugares del código: struct proc, allocproc(), kfork(),
+  scheduler(), alrededor de swtch(), y usertrap, kerneltrap y clockintr. Ahora
+  quiero que lo organicen ustedes. Hagan una tabla de cambios en la que cada
+  fila tenga:
+
+  1. Qué cambia: el comportamiento, no el código.
+  2. Propósito y regla de su descripción que lo exige.
+  3. Evidencia: qué observaron en el código que justifica tocar ese lugar.
+     Separen lo observado de lo que todavía es hipótesis.
+  4. Concurrencia: con 3 CPU, ¿quién más puede leer o modificar ese dato al
+     mismo tiempo, y qué lock lo protegería?
+
+  La columna 4 es la importante. Una pista para orientarse: en el bucle de
+  scheduler() que me pegaron, cada CPU toma el p->lock de un solo proceso a la
+  vez. Sus "filas por nivel", en cambio, son una estructura que relaciona a
+  muchos procesos y que varias CPU tocarían a la vez.
+
+  ¿Basta el lock de cada proceso para proteger sus filas, o necesitan otra cosa?
+  Justifíquenlo con lo que vieron en el código. Si no lo pueden confirmar
+  todavía, márquenlo como cuestión pendiente.
+
+> ¿Basta el lock de cada proceso para las filas?
+
+  No. Lo que observamos en el código:
+
+  p->lock protege solo los datos de un proceso. El comentario de struct proc lo
+  dice: “p->lock must be held when using these: state, chan, killed…”.
+  En scheduler(), cada CPU toma el p->lock de un proceso a la vez. Lo mismo
+  hacen wakeup() y kkill() mientras recorren proc[].
+  Una fila conecta a muchos procesos: tiene un primero, un último y el orden
+  entre ellos.
+
+  Ejemplo con 3 CPU: la CPU 0 está en wakeup() agregando a C al final de F0,
+  con el lock de C. La CPU 1 está en yield() agregando a A al final de F0, con
+  el lock de A. La CPU 2 está en scheduler() sacando al primero de F0, con el
+  lock de Q. Cada una tiene un lock distinto, así que nada impide que las tres
+  cambien el inicio o el final de F0 al mismo tiempo. La fila puede romperse,
+  perder un proceso o repetirlo.
+
+  Lo que proponemos: un lock global para las filas, aparte de los p->lock. Hay
+  un precedente en el mismo código: xv6 ya usa un lock global, wait_lock, para
+  la relación padre-hijo, que también conecta a varios procesos (proc.c:27, y
+  el comentario de struct proc sobre parent).
+
+  Cuestiones pendientes
+  Orden de los locks. yield, wakeup, kkill y kfork ya tienen p->lock tomado
+  cuando ponen RUNNABLE. Si ahí agregan a la fila, el orden sería primero
+  p->lock y después el lock de las filas. En cambio, scheduler() querría tomar
+  primero el lock de las filas (para elegir) y después el p->lock del elegido.
+  Ese es el orden contrario y podría causar un interbloqueo. (H) Una salida: el
+  planificador saca al proceso de la fila, suelta el lock de las filas y
+  recién después toma el p->lock. Falta comprobar que sea correcto.
+  Leer las filas en cada tick. La regla 8 pregunta en cada tick si hay alguien
+  más alto esperando. (H) Tomar el lock de las filas en cada tick y en cada CPU
+  puede ser caro. Como la regla 9 ya acepta un retraso de un tick, quizá baste
+  una lectura sin lock de un dato simple, como “nivel más alto con procesos
+  listos”, y que cualquier error se corrija en el siguiente tick. Sin
+  comprobar.
+  Boost desde una interrupción. (O) acquire() desactiva las interrupciones
+  (push_off), así que el tick no puede llegar mientras esta CPU tiene un lock
+  tomado. (H) Eso haría seguro tomar los locks en el boost dentro de clockintr,
+  pero falta revisarlo con el orden de locks del primer punto.
+
+> ¿Basta el lock de cada proceso para las filas?
+
+  No. Lo que observamos en el código:
+
+  p->lock protege solo los datos de un proceso. El comentario de struct proc lo
+  dice: “p->lock must be held when using these: state, chan, killed…”.
+  En scheduler(), cada CPU toma el p->lock de un proceso a la vez. Lo mismo
+  hacen wakeup() y kkill() mientras recorren proc[].
+  Una fila conecta a muchos procesos: tiene un primero, un último y el orden
+  entre ellos.
+
+  Ejemplo con 3 CPU: la CPU 0 está en wakeup() agregando a C al final de F0,
+  con el lock de C. La CPU 1 está en yield() agregando a A al final de F0, con
+  el lock de A. La CPU 2 está en scheduler() sacando al primero de F0, con el
+  lock de Q. Cada una tiene un lock distinto, así que nada impide que las tres
+  cambien el inicio o el final de F0 al mismo tiempo. La fila puede romperse,
+  perder un proceso o repetirlo.
+
+  Lo que proponemos: un lock global para las filas, aparte de los p->lock. Hay
+  un precedente en el mismo código: xv6 ya usa un lock global, wait_lock, para
+  la relación padre-hijo, que también conecta a varios procesos (proc.c:27, y
+  el comentario de struct proc sobre parent).
+
+● Buena respuesta. El ejemplo con tres CPU muestra con precisión por qué los
+  locks de cada proceso no bastan: cada CPU tiene un lock distinto, pero las
+  tres modifican la misma estructura. Y el precedente de wait_lock es la
+  evidencia correcta, porque es el mismo tipo de problema que xv6 ya resolvió
+  una vez.
+
+  Me falta una parte: la tabla de cambios con las cuatro columnas (qué cambia,
+  propósito y regla, evidencia, concurrencia). Respondieron la pregunta central,
+  pero la tabla es la parte central del objetivo B. Déjenla para su próximo
+  mensaje, junto con la respuesta a esta pregunta.
+
+  Tener un segundo lock trae un problema nuevo. Vuelvan a leer el comentario de
+  wait_lock en su proc.c, justo encima de la línea 27. Si su versión es como la
+  que conozco, dice algo sobre en qué orden se toma respecto de p->lock.
+  Confírmenlo; por ahora es una hipótesis mía.
+
+  Ahora piensen en dónde se tomaría su lock de filas:
+
+  - yield(), wakeup() y kfork() ya tienen tomado el p->lock del proceso cuando
+    lo ponen RUNNABLE, que es justo cuando habría que meterlo en una fila.
+  - scheduler() quiere primero elegir de la fila y después tomar el p->lock del
+    elegido.
+
+  Construyan un caso concreto con dos CPU en el que esos dos órdenes provoquen
+  que ambas CPU se queden esperando para siempre. ¿Qué orden entre p->lock y el
+  lock de filas proponen, y cómo tendría que comportarse scheduler() para
+  respetarlo? Describan el comportamiento, no el código. Si la respuesta depende
+  de algo que no pueden comprobar en el código, márquenlo como hipótesis
+  pendiente.
+
+> Una aclaración: la tabla de cuatro columnas sí estaba en el mensaje anterior,
+  al principio, antes de la pregunta sobre los locks. Puede que no se viera.
+  La repito al final, actualizada con lo de este turno.
+
+  1. El comentario de wait_lock
+
+  Tu hipótesis se confirma. En kernel/proc.c, líneas 22–27:
+
+  // helps ensure that wakeups of wait()ing
+  // parents are not lost. helps obey the
+  // memory model when using p->parent.
+  // must be acquired before any p->lock.
+  struct spinlock wait_lock;
+
+  Dice que wait_lock debe tomarse antes que cualquier p->lock. El código lo
+  respeta:
+
+  kwait() toma primero wait_lock y después pp->lock de cada hijo.
+  kexit() toma primero wait_lock y después p->lock.
+  kfork() suelta np->lock antes de tomar wait_lock para escribir np->parent, y
+  luego vuelve a tomar np->lock para ponerlo RUNNABLE. Suelta un lock solo para
+  no romper el orden.
+  2. Un caso concreto de bloqueo con dos CPU
+
+  Usamos el boost, porque cambia el nivel de cada proceso (eso necesita
+  p->lock) y lo mueve de fila (eso necesita el lock de filas).
+
+  Q está en la fila F2.
+  CPU 0 hace el boost. Toma Q->lock para poner a Q en (0, 0) y ahora quiere el
+  lock de filas para moverlo a F0.
+  CPU 1 está en scheduler(). Tomó el lock de filas, eligió a Q, que es el
+  primero de la fila, y ahora quiere Q->lock.
+
+  La CPU 0 espera algo que tiene la CPU 1, y la CPU 1 espera algo que tiene la
+  CPU 0. Ninguna avanza nunca. Además, acquire() desactiva las interrupciones
+  (push_off), así que ni siquiera el temporizador puede sacarlas de ahí. La
+  máquina se queda colgada.
+
+  El mismo problema aparece con cualquier código que tenga el p->lock de un
+  proceso que está en una fila y quiera tocar esa fila, mientras scheduler()
+  hace lo contrario.
+
+  3. El orden que proponemos
+
+  Primero p->lock, después el lock de filas. El orden completo queda: wait_lock
+  → p->lock → lock de filas.
+
+  Por qué: los 5 lugares que ponen RUNNABLE (userinit, kfork, yield, wakeup,
+  kkill) ya tienen p->lock tomado en ese momento. Con este orden pueden agregar
+  el proceso a la fila sin soltar nada. Con el orden contrario tendrían que
+  soltar p->lock para tomar el lock de filas, y en ese hueco el proceso estaría
+  RUNNABLE sin estar en ninguna fila.
+
+  Cómo se comporta scheduler() con este orden:
+
+  Toma el lock de filas.
+  Saca al primero de la fila más alta que no esté vacía. Al sacarlo, ninguna
+  otra CPU puede elegirlo.
+  Suelta el lock de filas.
+  Recién entonces toma el p->lock del elegido.
+  Comprueba que siga RUNNABLE. Si sigue, lo ejecuta como hoy (con p->lock
+  tomado alrededor de swtch()). Si no, lo descarta y vuelve al paso 1.
+
+  Así scheduler() nunca tiene los dos locks a la vez en el orden prohibido. En
+  el caso del punto 2, la CPU 1 ya no tendría el lock de filas cuando espera
+  Q->lock, y la CPU 0 podría terminar el boost.
+
+  Lo que cambia: antes valía “RUNNABLE ⇔ está en una fila”. Ahora vale “está en
+  una fila ⇒ RUNNABLE” y “RUNNABLE ⇒ está en una fila o una CPU acaba de
+  sacarlo”. El boost y la revisión del tick tienen que aceptar un proceso
+  RUNNABLE que no está en ninguna fila. En ese caso solo cambian su nivel y su
+  contador.
+
+  4. Pendientes
+  (O) kkill solo cambia SLEEPING a RUNNABLE, y nada pasa un proceso de RUNNABLE
+  a otro estado salvo scheduler() al ejecutarlo. (H) Por eso creemos que la
+  comprobación del paso 5 casi nunca falla. La dejamos por seguridad, pero
+  falta confirmarlo.
+  (H) El boost debe recorrer los procesos tomando para cada uno p->lock y
+  después el lock de filas, nunca al revés. Falta revisar que dentro de
+  clockintr no se tenga ya algún otro lock que rompa el orden. clockintr toma
+  tickslock, pero lo suelta antes de terminar.
+  5. Tabla de cambios (actualizada)
+
+  (O) = observado en el código. (H) = hipótesis.
+
+  #       Qué cambia      Propósito y regla       Evidencia       Concurrencia
+  (3 CPU)
+  1       Cada proceso guarda su nivel, su contador y la hora de inicio de su
+  turno       Saber su fila y cuánto usó. Reglas 2–4  (O) struct proc no tiene
+  campos de planificación. (O) Su comentario indica qué campos protege p->lock
+   Los tocan la CPU que lo ejecuta, la CPU 0 en el boost y kfork. Se protegen
+  con p->lock
+  2       Un proceso nuevo empieza en (0, 0). Un hijo copia el nivel y el
+  contador del padre      Regla 11        (O) allocproc() prepara todo proceso
+  nuevo. (O) kfork() ya copia lo demás del padre y pone RUNNABLE (línea 301) El
+  hijo con np->lock. El padre con p->lock, porque el boost puede tocarlo a la
+  vez. (O) kfork nunca tiene los dos a la vez
+  3       Se mide el tiempo real de cada turno    Medición exacta. Regla 3
+    (O) El único swtch() hacia el proceso está en scheduler(). (H) r_time()
+  antes y después da el tiempo real       Lo escribe la CPU que lo ejecutó. (O)
+  Ya tiene p->lock tomado alrededor del swtch()
+  4       Al pasar a RUNNABLE, el proceso entra al final de la fila de su nivel
+    Round-Robin. Reglas 7 y 10      (O) 5 lugares ponen RUNNABLE: líneas 228,
+  301, 505, 590 y 614   Cualquier CPU, a la vez. Lock de filas, tomado después
+  de p->lock
+  5       Se elige al primero de la fila más alta, sin recorrer proc[]
+  Reglas 6 y 7    (O) Hoy se recorre proc[] y gana el de menor índice (caso P y
+  Q)        Lock de filas para sacar. Se suelta antes de tomar p->lock del
+  elegido
+  6       En cada tick se cede solo si se agotó el quantum o hay alguien más
+  alto; se baja de nivel o se queda en el último       Reglas 4, 5, 8 y 9
+  (O) usertrap y kerneltrap llaman a yield() siempre que which_dev == 2. Hay
+  que cambiar los dos  Mirar las filas requiere el lock de filas. (H) Quizá
+  baste un dato leído sin lock, porque se acepta un tick de retraso
+  7       Cada cierto número de ticks, todos pasan a (0, 0) en el orden de la
+  regla 12    Regla 12        (O) clockintr solo cuenta ticks en la CPU 0. (H)
+  El boost va después de la revisión del tick    Toca todos los procesos y
+  todas las filas. Para cada proceso: p->lock y después el lock de filas. Debe
+  aceptar procesos que no estén en ninguna fila
+
+● Tienen razón, lo siento. Ese mensaje se interrumpió y me llegó una versión sin
+  la tabla. Ahora sí la tengo completa.
+
+  La respuesta sobre los locks es sólida:
+
+  - Evidencia confirmada: wait_lock "must be acquired before any p->lock", y
+    vieron que kfork() suelta np->lock precisamente para no romper ese orden.
+    Eso es un precedente directo de su propuesta.
+  - Caso de bloqueo: usar el boost como la segunda CPU lo hace realista, y la
+    observación sobre push_off explica por qué ni siquiera el temporizador puede
+    romper la espera.
+  - Cambio de invariante: pasar de "RUNNABLE ⇔ en una fila" a dos implicaciones
+    es la consecuencia que más se suele pasar por alto. Ustedes la escribieron
+    sin que se la pidiera.
+
+  Una cosa más para la columna 4 de la fila 7, como cuestión pendiente. El boost
+  pone el contador en cero, pero si un proceso está corriendo en ese momento,
+  su regla 3 sumará el turno en curso cuando salga de la CPU. ¿Esa suma incluye
+  el tiempo que corrió antes del boost? Si es así, ese tiempo se le cobraría en
+  el nivel 0 nuevo. Decidan si importa y qué haría falta, y anótenlo.
+
+  Con esto el objetivo B queda en buen estado. Pasamos al objetivo C.
+
+  Propongan entre cuatro y seis escenarios para comprobar una futura
+  implementación. Para cada uno indiquen:
+
+  1. Procesos que participan y qué hace cada uno: cuánto calcula, cuándo duerme,
+     si hace fork().
+  2. Regla que comprueba, por número. Lo ideal es que cada escenario aísle una o
+     dos reglas.
+  3. Comportamiento esperado en términos observables.
+  4. Qué se vería si la regla estuviera mal implementada. Un escenario que no
+     puede fallar no comprueba nada.
+  5. Cómo lo observarían en xv6. En su síntesis mencionaron procdump con Ctrl+P.
+     ¿Basta para ver lo que necesitan, o les haría falta otra forma de
+     observarlo? Si no saben qué ofrece su versión, márquenlo como hipótesis.
+
+  ¿Qué reglas consideran más arriesgadas de implementar mal? Empiecen por esas y
+  justifiquen la elección. Sus propias trazas, la de B que esquiva el quantum,
+  la de P y Q, la de D con fork y la del tick 100, son un buen punto de partida,
+  pero conviertan cada una en un escenario que se pueda observar.
+
+> Pendiente de la fila 7: el turno que está corriendo durante el boost
+
+  Sí importa. Si el proceso guarda la hora de inicio de su turno y la regla 3
+  suma “fin − inicio” cuando sale de la CPU, se le cobra en el nivel 0 nuevo el
+  tiempo que corrió antes del boost, que corresponde a su nivel anterior.
+  Ejemplo: en el tick 100, C ya llevaba 2 ticks de turno. Con su contador en 0
+  después del boost, al salir se le sumarían esos 2 ticks y empezaría el nivel
+  0 con solo 8. En un caso peor, un proceso con un turno largo podría bajar de
+  nivel justo después del boost.
+
+  Qué haría falta: al hacer el boost, además de poner el contador en cero,
+  reiniciar la hora de inicio del turno al momento del boost para cada proceso
+  que esté corriendo. Así solo se cobra en el nivel 0 lo que corra después del
+  boost. (H) El boost se hace en la CPU 0 y el proceso puede estar corriendo en
+  otra. Hay que tomar su p->lock para cambiar ese dato, como en el resto del
+  boost.
+
+  Qué reglas son más arriesgadas
+  Regla 3 (medición): es fácil terminar contando ticks en vez de tiempo real,
+  olvidar el tiempo dentro del kernel o reiniciar el contador al dormir.
+  Cualquiera de esos errores reabre el truco de B y nadie lo nota a simple
+  vista.
+  Reglas 5 y 7 (fila y último nivel): si se sigue recorriendo proc[], el
+  sistema funciona y parece correcto, pero el proceso de menor índice acapara
+  la CPU, como pasaba con P y Q.
+  Regla 12 (boost): coincide en el mismo tick con otras reglas (caso del tick
+  100) y toca todos los procesos y todas las filas.
+  Regla 11 (fork): es fácil olvidarla o copiar solo el nivel sin el contador.
+  Locks (regla 9 con 3 CPU): un error en el orden de los locks no se nota en
+  pruebas cortas y cuelga la máquina solo de vez en cuando.
+
+  La regla 8 entra en los escenarios 3 y 5.
+
+  Cómo observar: Ctrl+P no basta
+
+  (O) En nuestra versión, procdump() imprime solo pid, estado y nombre. No
+  muestra nivel, contador ni tiempo de CPU usado. Además es una foto tomada a
+  mano, así que no puede capturar lo que pasa en un tick concreto. (O) Las
+  llamadas que ya existen y sirven son uptime (ticks desde el arranque) y pause
+  (dormir N ticks).
+
+  Lo que haría falta:
+
+  A. Extender procdump() para imprimir también nivel, contador y tiempo total
+  de CPU. (H) Es fácil, porque procdump() ya recorre proc[].
+  B. Una llamada al sistema nueva que devuelva el nivel y el tiempo total de
+  CPU de un proceso, para que un programa de prueba lo imprima solo. (H) Hay
+  que agregarla.
+  C. Un registro del kernel activable que imprima una línea por evento: tick,
+  pid, nivel antes y después, contador y motivo (agotó quantum, expropiado,
+  boost). (H) printk es lento y puede alterar los tiempos, así que conviene
+  usarlo solo en pruebas cortas.
+
+  Salvo el escenario 6, todos se corren con make CPUS=1 qemu para aislar las
+  reglas.
+
+  Escenarios
+  Escenario 1: esquivar el quantum (la traza de B)
+  Procesos: A calcula sin parar. B calcula unos 9 ticks (mirando uptime), hace
+  pause(1) y repite.
+  Reglas: 3 y 4.
+  Esperado: B también baja de nivel, en su segundo turno. A y B terminan en el
+  mismo nivel y reciben una cantidad de CPU parecida.
+  Si está mal: B se queda en el nivel 0 y recibe cerca del 90% de la CPU,
+  mientras A avanza muy poco.
+  Cómo verlo: con B, cada uno imprime su tiempo total de CPU al final. Con A,
+  mirar el nivel con Ctrl+P.
+  Variante (H): B calcula un poco menos de un tick y duerme justo antes del
+  siguiente. Si la medición fuera por muestreo, su contador quedaría casi en 0.
+  Es difícil de calibrar desde el programa.
+  Escenario 2: Round-Robin dentro del nivel y en el último (P y Q)
+  Procesos: P y Q, los dos calculando sin parar. Boost desactivado o muy largo
+  para aislar la regla.
+  Reglas: 5, 6 y 7.
+  Esperado: bajan juntos hasta el último nivel y ahí se turnan en tramos de un
+  quantum: P, Q, P, Q. Su tiempo de CPU queda parecido (1 a 1).
+  Si está mal: uno de los dos, el de menor índice en proc[], se queda con la
+  CPU en el último nivel y el otro deja de avanzar.
+  Cómo verlo: cada proceso imprime su pid cada cierto número de vueltas. Se ve
+  si las líneas se alternan o si un pid desaparece. Al final, comparar tiempos
+  de CPU con B.
+  Escenario 3: un interactivo frente a intensivos (C)
+  Procesos: 2 intensivos que ya bajaron al último nivel, y C, que hace pause(5)
+  en bucle y mide con uptime cuánto tarda en volver a correr.
+  Reglas: 8 y 10.
+  Esperado: C sigue en el nivel 0 y su retraso es como mucho 1 tick sobre lo
+  pedido.
+  Si está mal: si solo se cede al agotar el quantum (opción 2), C espera hasta
+  un quantum del último nivel (40 ticks). Si C baja de nivel al dormir, su
+  retraso crece con el tiempo.
+  Cómo verlo: C imprime el retraso máximo que midió. Con A, comprobar su nivel.
+  Escenario 4: cadena de fork (D) y el shell
+  Procesos: D calcula unos 9 ticks, hace fork(), el hijo sigue y el padre
+  termina, y así en bucle. A calcula sin parar.
+  Regla: 11.
+  Esperado: el trabajo de D baja de nivel como si fuera un solo proceso, y A
+  recibe una parte justa.
+  Si está mal: el trabajo de D se queda siempre en el nivel 0 (regla no
+  implementada, o se copia solo el nivel) y A casi no avanza.
+  Segunda parte: con A corriendo, lanzar echo o ls desde el shell. Deben
+  responder enseguida, porque heredan el nivel 0 del shell.
+  Cómo verlo: con A, el nivel de los procesos de D con Ctrl+P. A imprime su
+  avance. El shell se comprueba a simple vista.
+  Escenario 5: el boost y el tick 100
+  Procesos: el caso de prueba del objetivo A: A y Q en el último nivel, C
+  despertado justo antes del boost.
+  Regla: 12, más la regla 3 con el pendiente de arriba.
+  Esperado: el orden exacto de nuestra traza. En el tick 98 A tiene contador
+  33. En el tick 100, C deja la CPU y queda último en la fila. Después corre Q
+  y luego A. Además, el proceso que corría durante el boost empieza el nivel 0
+  con su quantum completo.
+  Si está mal: C sigue corriendo después del boost (regla 12 sin corregir), Q
+  no es el primero, o un proceso baja de nivel justo después del boost porque
+  se le cobró tiempo anterior.
+  Cómo verlo: solo con C, el registro de eventos, comparando línea por línea
+  con la traza escrita. Ctrl+P no sirve, porque todo pasa en uno o dos ticks.
+  Escenario 6: tres CPU con carga mixta
+  Procesos: con make qemu (3 CPU), correr a la vez varios intensivos, uno que
+  hace muchos fork() (forktest), uno que duerme y despierta a menudo, y
+  usertests.
+  Reglas: 9 y el orden de locks.
+  Esperado: todo termina, sin cuelgues ni panic. Ningún proceso RUNNABLE se
+  queda sin correr para siempre.
+  Si está mal: la máquina se cuelga (interbloqueo), hay un panic en acquire o
+  sched, o un proceso aparece runble en Ctrl+P sin avanzar nunca porque se
+  perdió de las filas.
+  Cómo verlo: que termine sin errores. Ctrl+P durante la prueba. (H) Agregar
+  una comprobación en el kernel que, cada cierto tiempo, revise el invariante
+  “está en una fila ⇒ RUNNABLE” y haga panic si falla. Como los errores de
+  concurrencia aparecen de vez en cuando, hay que repetir la prueba varias
+  veces.
+
+● Los escenarios están bien construidos. Cada uno dice qué se vería si la regla
+  estuviera mal implementada, que es lo que hace que un escenario sirva para
+  comprobar algo. Además vieron por su cuenta que Ctrl+P no basta y separaron lo
+  observado (procdump solo muestra pid, estado y nombre; existen uptime y
+  pause) de lo que habría que agregar.
+
+  Tres observaciones breves para ajustarlos:
+
+  1. La instrumentación también es un cambio. La extensión de procdump, la
+     llamada nueva y el registro de eventos no aparecen en la tabla del objetivo
+     B. Agréguenlos como una fila más con su propósito: hacer observables las
+     reglas. Lo mismo vale para "boost desactivado o muy largo" del escenario 2:
+     eso supone que el periodo se pueda configurar, así que anótenlo.
+  2. El escenario 5 depende de tiempos exactos. Poner a C a despertar en el tick
+     97,5 desde un programa de usuario es difícil de lograr. Anoten cómo lo
+     provocarían o que la reproducibilidad de ese escenario queda pendiente.
+  3. Precisión en el escenario 1. "En su segundo turno" depende de que el primer
+     turno de B dure exactamente 9 ticks. Con pause(1) y uptime, B mide ticks,
+     mientras que el kernel, según su regla 3, mide tiempo real. ¿Coinciden
+     siempre? Déjenlo como hipótesis.
+
+  Del escenario 3 no digo nada todavía. Vuelvo a él al final.
+
+  Pregunta de este turno. Redacten sus conclusiones con sus palabras, como irían
+  en el reporte. Que respondan al menos a esto:
+
+  - ¿Qué variante de MLFQ proponen y en qué se diferencia de su descripción
+    inicial? ¿Qué aprendieron de las reglas que resultaron ambiguas?
+  - ¿Qué necesita xv6 para soportarla y cuál es el cambio más delicado? ¿Por qué
+    ese?
+  - ¿Cómo sabrían que una implementación futura es correcta?
+  - ¿Qué queda pendiente de investigación?
+
+  Después de leerlas les haré una última pregunta sobre un caso concreto para
+  comprobar que las conclusiones y las reglas dicen lo mismo.
+
+> Ajustes a lo anterior
+
+  1. Nueva fila en la tabla del objetivo B
+
+  #       Qué cambia      Propósito y regla       Evidencia       Concurrencia
+  (3 CPU)
+  8       Instrumentación: procdump() muestra también nivel, contador y tiempo
+  total de CPU; una llamada nueva devuelve esos datos a un programa; un
+  registro de eventos activable; el periodo del boost se puede configurar (o
+  desactivar)       Hacer observables las reglas 3–12 para los escenarios del
+  objetivo C    (O) procdump() solo imprime pid, estado y nombre. (O) Ya
+  existen uptime y pause. (H) Todo lo demás hay que agregarlo    procdump() hoy
+  lee state sin tomar p->lock. (H) Para leer nivel y contador basta tomar
+  p->lock de cada proceso. El registro escribe desde varias CPU a la vez y las
+  líneas pueden mezclarse. El periodo del boost lo lee la CPU 0, y si se cambia
+  en caliente necesita un lock o un valor que se lea completo
+
+  2. Escenario 5: reproducibilidad pendiente. Desde un programa de usuario no
+  se puede hacer que C despierte en el tick 97,5. (O) pause despierta a los
+  procesos dentro de clockintr (wakeup(&ticks)), es decir, siempre justo en un
+  tick, nunca entre dos. Para despertar entre ticks hace falta una interrupción
+  real del teclado. (H) Se podría enviar teclas a QEMU con un script (el
+  repositorio tiene test-xv6.py, falta ver si sirve para eso), pero sin control
+  exacto del momento. Queda pendiente. Por ahora el escenario se comprueba con
+  el registro de eventos y las cuentas exactas, aceptando que el momento de la
+  tecla varíe un poco.
+
+  3. Escenario 1: hipótesis. B mide sus “9 ticks” contando cambios de uptime,
+  pero el kernel mide tiempo real. (H) No coinciden siempre: B empieza a mitad
+  de un tick, así que 9 cambios de uptime pueden ser algo menos de 9 ticks
+  reales. Además, ticks solo se cuenta en la CPU 0. El resultado esperado queda
+  así: B baja de nivel en su segundo o tercer turno, y al final A y B reciben
+  una CPU parecida. Lo que se comprueba es eso, no el turno exacto.
+
+  Conclusiones
+
+  La variante que proponemos. Es un MLFQ con varios niveles en el que un
+  proceso baja según el tiempo real de CPU acumulado en su nivel, sin importar
+  cuántas veces ceda la CPU. Cada nivel tiene un solo número, su quantum, que
+  sirve a la vez como duración del turno y como presupuesto. Dentro de cada
+  nivel hay una fila con Round-Robin de verdad, también en el último nivel. En
+  cada tick solo se expropia si se agotó el quantum o si espera alguien de un
+  nivel más alto. Un hijo hereda el nivel y el contador de su padre. Un boost
+  periódico devuelve a todos al nivel 0 con un orden definido. Con varias CPU,
+  siempre deben correr los procesos de mayor prioridad, con un retraso máximo
+  de un tick.
+
+  En qué se diferencia de la descripción inicial. La inicial se leía turno por
+  turno, así que B podía quedarse arriba cediendo la CPU justo antes de agotar
+  el quantum. No decía qué pasa en el último nivel, trataba a los hijos como
+  procesos nuevos (lo que permitía el truco de D), daba por hecho que había una
+  sola CPU y que el arreglo proc[] funcionaba como una fila, y no decía qué
+  pasa cuando dos reglas coinciden en el mismo tick.
+
+  Qué aprendimos de las reglas ambiguas. Casi todos los problemas aparecieron
+  en casos pequeños y concretos, no al leer la descripción. Una regla que
+  parece clara puede dejar un hueco: “consumir todo el quantum” sin decir cómo
+  se cuenta, “la cola más alta” sin decir cuántas CPU hay, “entra en la cola
+  más alta” sin pensar en fork(). También aprendimos que cada mecanismo tiene
+  un propósito distinto y no reemplaza a otro: el boost protege a los niveles
+  bajos frente a los altos, y el Round-Robin reparte la CPU dentro de un nivel.
+  Por último, una regla debe decidir un único resultado. Por eso la regla del
+  boost ahora dice qué va primero cuando coincide con el fin de un quantum.
+
+  Qué necesita xv6. Datos de planificación en struct proc; valores iniciales en
+  allocproc() y herencia en kfork(); medición con el reloj alrededor de
+  swtch() en scheduler(); filas por nivel, a las que se entra en los 5 lugares
+  que ponen RUNNABLE; elección desde la fila en scheduler(); una nueva
+  condición para ceder en usertrap y kerneltrap; el boost en clockintr de la
+  CPU 0; e instrumentación para observar todo esto.
+
+  El cambio más delicado son las filas compartidas con 3 CPU. Los p->lock
+  protegen un proceso cada uno, pero las filas conectan a muchos procesos, así
+  que hace falta un lock nuevo. Ese lock debe respetar un orden con p->lock
+  (primero p->lock, después el de filas), porque con el orden contrario dos CPU
+  pueden quedarse esperándose para siempre con las interrupciones
+  desactivadas. Para cumplir ese orden, scheduler() tiene que soltar el lock de
+  filas antes de tomar el del proceso elegido, y eso cambia un invariante: un
+  proceso RUNNABLE puede no estar en ninguna fila por un momento. Es el cambio
+  más delicado porque sus errores no se ven en pruebas cortas, aparecen de vez
+  en cuando y cuelgan toda la máquina.
+
+  Cómo sabríamos que una implementación es correcta. Con los seis escenarios,
+  cada uno pensado para que falle de forma visible si su regla está mal: B que
+  no baja, P o Q que deja de avanzar, C que tarda mucho en responder, el
+  trabajo de D que se queda arriba, un orden distinto al de nuestra traza en el
+  tick 100, y cuelgues o procesos perdidos con 3 CPU. Para eso hay que agregar
+  instrumentación, porque Ctrl+P solo muestra pid, estado y nombre. Además,
+  hay que comparar los números exactos de nuestras trazas (como el contador 33
+  de A en el tick 98) con lo que muestre el registro, y repetir varias veces
+  las pruebas con 3 CPU.
+
+  Qué queda pendiente.
+
+  Los valores: número de niveles, quantum de cada uno, periodo del boost y
+  duración del tick.
+  Comprobar que scheduler() puede soltar el lock de filas antes de tomar
+  p->lock sin perder procesos, y que el boost no rompe el orden de locks dentro
+  de clockintr.
+  Si la revisión de cada tick puede leer las filas sin lock.
+  Reiniciar la hora de inicio del turno de los procesos que corren durante el
+  boost.
+  Cómo reproducir el escenario 5 con exactitud, y cuánto difieren los ticks de
+  uptime del tiempo real (escenario 1).
+  Fuera de alcance: avisar a otra CPU desde wakeup(), y el caso de muchos hijos
+  creados a la vez.
+
+● Las conclusiones son coherentes con todo lo que construyeron: explican qué
+  cambió respecto de la descripción inicial y por qué, el cambio más delicado
+  está justificado con evidencia del código y los pendientes están claramente
+  separados de lo decidido. Los tres ajustes también son correctos. Es muy buena
+  la observación de que pause siempre despierta justo en un tick porque
+  wakeup(&ticks) está en clockintr: es evidencia del código, y además explica
+  por qué el escenario 5 no se puede reproducir desde un programa de usuario.
+
+  Última pregunta: comprobación de consistencia. Es el escenario 3 que dejé
+  pendiente.
+
+  Una CPU. Niveles de 10, 20 y 40 ticks, y un boost cada 100 ticks. Dos procesos
+  intensivos ya están en el nivel 2. C repite este ciclo: pause(5) y luego 0,6
+  ticks de CPU real procesando lo que recibió. Su ciclo completo dura unos 6
+  ticks. C empieza en (0, 0) justo después de un boost.
+
+  En el escenario 3 escribieron como comportamiento esperado: "C sigue en el
+  nivel 0 y su retraso es como mucho 1 tick sobre lo pedido". En las
+  conclusiones dieron como señal de error "C que tarda mucho en responder".
+
+  Usando solo sus reglas numeradas, ¿en qué nivel está C a lo largo de los 100
+  ticks entre dos boosts? ¿Se cumple el resultado esperado que escribieron? Si C
+  baja de nivel, ¿eso es un error de la implementación o el comportamiento
+  correcto según sus reglas? ¿Su retraso aumenta?
+
+  Después díganme qué tendría que decir exactamente el resultado esperado del
+  escenario 3 para coincidir con sus reglas. Y por último: si el periodo del
+  boost fuera de 1000 ticks, ¿qué cambiaría, y qué les dice eso sobre el valor
+  pendiente que dejaron?
+
+> Primero, un dato del código
+
+  (O) En sys_pause (kernel/sysproc.c:68), C guarda ticks0 = ticks y duerme
+  hasta que ticks - ticks0 >= 5. C despierta siempre justo en un tick (dentro
+  de clockintr), corre 0,6, y cuando vuelve a llamar a pause(5) todavía no pasó
+  el siguiente tick, así que ticks0 es el tick en que despertó. El ciclo dura
+  exactamente 5 ticks, no 6. Uso 5. Con 6 la conclusión es la misma, solo se
+  mueve un poco el tick en que baja.
+
+  En qué nivel está C entre dos boosts
+  Ticks 0 a 80, nivel 0. C despierta en el tick 0, 5, 10… Ese mismo tick, la
+  regla 8 ve que C espera en un nivel más alto que los intensivos, así que el
+  intensivo sale y C corre enseguida. Gasta 0,6 por ciclo (regla 3). Su
+  contador sube 0,6, 1,2, … 9,6 en los primeros 16 ciclos.
+  Tick 80,6, baja al nivel 1. En el ciclo 17 (desde el tick 80) llega a 10,2 al
+  dormirse. Su tiempo acumulado llegó al quantum, así que baja al nivel 1 con
+  el contador en cero (regla 4).
+  Ticks 80,6 a 100, nivel 1. Para bajar otra vez necesitaría 20 ticks de CPU,
+  unos 34 ciclos. No llega: en el tick 100 el boost lo devuelve a (0, 0) (regla
+  12).
+
+  Así que el resultado esperado que escribí no se cumple: C no “sigue en el
+  nivel 0”, pasa cerca de un 20% de cada periodo en el nivel 1.
+
+  ¿Es un error de la implementación? No. Es lo que dicen las reglas 3 y 4: se
+  cuenta el tiempo real acumulado, y C, aunque es interactivo, acumula 10 ticks
+  en unos 17 ciclos. El error estaba en el resultado esperado, no en las
+  reglas.
+
+  ¿Aumenta su retraso? No. En el nivel 1 C sigue estando por encima de los
+  intensivos, que están en el nivel 2. Cuando despierta, la regla 8 los saca en
+  ese mismo tick. Su retraso sigue siendo como mucho 1 tick (en la práctica
+  casi 0, porque despierta justo en un tick). Lo que importa para responder
+  rápido no es estar en el nivel 0, sino estar por encima de los intensivos.
+
+  Detalle pequeño: al bajar, a C le sobraban 0,2 ticks (10,2 − 10). La regla 4
+  dice que el contador vuelve a cero, así que esos 0,2 no se le cobran en el
+  nivel 1. Es lo que dice la regla, pero conviene anotarlo, porque en el
+  registro de eventos ese número no va a cuadrar con la suma total.
+
+  Cómo debería decir el resultado esperado del escenario 3
+
+  C usa alrededor del 12% de la CPU (0,6 de cada 5 ticks). En cada periodo de
+  boost, C baja del nivel 0 al 1 cuando acumula 10 ticks de CPU (tras unos 17
+  ciclos, hacia el tick 80) y vuelve al nivel 0 con el boost. Mientras C esté
+  en un nivel más alto que los intensivos, su retraso es como mucho 1 tick
+  sobre lo pedido. Señal de error: que C llegue al nivel de los intensivos
+  antes del boost, o que su retraso supere 1 tick mientras está por encima de
+  ellos.
+
+  Si el boost fuera cada 1000 ticks
+  Ticks 0 a 80, nivel 0. Igual que antes.
+  Ticks 80 a 250, nivel 1. Necesita 20 ticks de CPU, unos 34 ciclos, alrededor
+  de 170 ticks.
+  Desde el tick 250, nivel 2, el mismo que los intensivos. Ahora C espera su
+  turno en la fila (regla 7), detrás de dos procesos que pueden correr hasta 40
+  ticks cada uno. Su retraso puede llegar a unos 80 ticks (8 segundos en QEMU)
+  en vez de 1.
+  Se queda así unos 750 ticks, hasta el boost del tick 1000.
+
+  Ahí sí aparece la señal de error “C tarda mucho en responder”, pero la
+  implementación sería correcta: las reglas hacen exactamente eso. Lo que está
+  mal es el valor del parámetro.
+
+  Qué nos dice sobre el valor pendiente. Antes dijimos que el periodo del boost
+  debía ser “parecido al tiempo que tarda un interactivo en gastar el quantum
+  del nivel 0”. Este caso lo afina: el límite que importa es el tiempo que
+  tarda un interactivo en llegar al nivel de los intensivos:
+
+  periodo del boost < (suma de los quanta de todos los niveles menos el último)
+  ÷ (fracción de CPU que usa el interactivo)
+
+  Para C: (10 + 20) ÷ 0,12 ≈ 250 ticks. Con 100 se cumple con margen; con 1000
+  no. Así que el periodo del boost no se puede elegir solo: depende de los
+  quanta y de cuánta CPU usen los procesos interactivos que queremos proteger.
+  Un interactivo que use más CPU necesita un boost más frecuente o quanta más
+  grandes arriba.
+
+● Tienen razón con el ciclo: pause(5) hace que dure 5 ticks y no 6. Sacaron el
+  dato de sys_pause, y ese tipo de lectura del código es la que vuelve confiable
+  el reporte.
+
+  Su respuesta es consistente con las reglas, y la diferencia importante la
+  hicieron ustedes mismos. Que C baje de nivel no es un error. Lo que estaba mal
+  era el resultado esperado. Para responder rápido, a C le basta con estar por
+  encima de los intensivos, no necesariamente en el nivel 0. Y cuando falla el
+  caso de 1000 ticks, la causa es el valor del parámetro, no la implementación.
+
+  La fórmula se puede leer también al revés, y vale la pena que la anoten así:
+
+  ▎ fracción máxima protegida = (suma de los quanta salvo el último) ÷ periodo
+  ▎ del boost
+
+  Con su ejemplo da 30 ÷ 100 = 30 %. En la práctica, los parámetros definen qué
+  significa "interactivo" en su variante: todo proceso que use menos de esa
+  fracción de CPU nunca llega al nivel de los intensivos antes del boost. Anoten
+  también los supuestos de la fórmula: el proceso usa la CPU a un ritmo
+  constante, empieza el periodo con el contador en cero y hay un solo proceso
+  interactivo. Si alguno no se cumple, la fórmula da una estimación y no una
+  garantía.
+
+  Con esto cumplieron los tres objetivos y el cierre. El reporte es de ustedes,
+  así que solo les señalo qué partes de su propio texto quedaron desactualizadas
+  por este último caso:
+
+  - El resultado esperado del escenario 3, que ya reescribieron.
+  - La señal de error "C que tarda mucho en responder" en las conclusiones. Por
+    lo que acaban de ver, puede tener dos causas distintas: un error de
+    implementación o un parámetro mal elegido. Un buen escenario debería
+    distinguirlas.
+  - En valores pendientes, el periodo del boost ya no se justifica con "es
+    parecido a…". Ahora tiene una relación con los quanta y con la fracción de
+    CPU que usan los interactivos.
+  - El sobrante de 0,2 ticks al bajar de nivel, anotado como un efecto de la
+    regla 4 que hay que tener en cuenta al leer el registro de eventos.
+
+  Buen trabajo. Partieron de una descripción que parecía completa y, con casos
+  pequeños, encontraron sus huecos. Cada decisión que tomaron la apoyaron en
+  código que vieron y no en suposiciones. Si más adelante implementan la
+  variante, pueden volver con los resultados de los escenarios y los comparamos
+  con lo que predijeron aquí.
